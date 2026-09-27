@@ -49,6 +49,8 @@ export class Game extends EventTarget {
     this.moves = 0;
     this.hints = 0;
     this.hintLog = [];
+    this.lastHintKey = ''; // 上一次念出来的那条结论（内容身份，连着按提示不许重复同一句话）
+    this.lastHintStamp = ''; // 它的盘面签名：签名没变才谈得上「刚念过」
     this.startedAt = now();
     this.pausedMs = 0;
     this.won = false;
@@ -372,13 +374,29 @@ export class Game extends EventTarget {
       return { ok: false, conflict: true, why: d.res.conflict, free: true };
     }
     const rows = d.res.rows || [];
-    const next = pickUnrealized(rows, this.ink, this.notes, this.sel);
-    if (!next) {
-      const first = rows[0];
-      if (!first) return { ok: false, why: '这盘没有可提示的结论' };
-      return this.charge(first, '（这一步你已经做过了，接着往下想）');
+    if (!rows.length) return { ok: false, why: '这盘没有可提示的结论' };
+    let row = pickUnrealized(rows, this.ink, this.notes, this.sel);
+    let suffix = row ? null : '（这一步你已经做过了，接着往下想）';
+    if (!row) row = rows[0];
+    // 连着要提示不许念同一句话：盘面没动（推导的签名一模一样）、看的还是同一格，
+    // 那第二条就必须往前走——顺着推导往下找一条不是刚念过的，走到末尾再绕回开头。
+    // 玩家一旦落子/记铅笔/换选中格，签名就变了，重新开始念。
+    // 比对只能按**内容**比：derive(true) 每次都重算，rows 里的对象是新生成的，比 `===` 永远不等。
+    const stamp = `${b.text}|${d.sig}|${this.sel}`;
+    const key = hintKey(row);
+    if (key === this.lastHintKey && stamp === this.lastHintStamp) {
+      const from = rows.indexOf(row);
+      for (let k = 1; k < rows.length; k++) {
+        const alt = rows[(from + k) % rows.length];
+        if (hintKey(alt) === key) continue;
+        row = alt;
+        suffix = realized(alt, this.ink, this.notes) ? '（这一步你已经做过了，接着往下想）' : null;
+        break;
+      }
     }
-    return this.charge(next, null);
+    this.lastHintKey = hintKey(row);
+    this.lastHintStamp = stamp;
+    return this.charge(row, suffix);
   }
 
   charge(row, suffix) {
@@ -442,19 +460,26 @@ function assignAt(ink, cell, v) {
   return out;
 }
 
+// 一条结论的**内容**身份：同一份推导重算一遍会得到新对象，所以「刚没刚念过」只能这么比。
+function hintKey(row) {
+  return `${row.kind}|${row.cell}|${row.value}|${row.text}`;
+}
+
 // 脚本里的哪一条是「玩家还没做到的」：
 //   * 落子：那一格现在不是这个数；
 //   * 排除：那一格还空着，且玩家的铅笔里这个候选还没被划掉。
+function realized(row, ink, notes) {
+  if (row.kind === 'place') return ink[row.cell] === row.value;
+  if (row.kind === 'elim') return !!ink[row.cell] || !maskHas(notes[row.cell], row.value);
+  return true;
+}
+
 // 优先给**选中格**相关的结论——人在看哪一格，提示就该从哪一格说起；没有就按推导顺序给。
 function pickUnrealized(rows, ink, notes, sel) {
   let fallback = null;
   for (const row of rows) {
-    if (row.kind === 'place') {
-      if (ink[row.cell] === row.value) continue;
-    } else if (row.kind === 'elim') {
-      if (ink[row.cell]) continue;
-      if (!maskHas(notes[row.cell], row.value)) continue;
-    } else continue;
+    if (row.kind !== 'place' && row.kind !== 'elim') continue;
+    if (realized(row, ink, notes)) continue;
     if (row.cell === sel) return row;
     if (!fallback) fallback = row;
   }
