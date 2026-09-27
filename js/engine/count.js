@@ -17,10 +17,14 @@ const OPS = ['=', '+', '-', '*', '/'];
 
 /** 自己解析题面文本：`op目标数:格子对` 用分号隔开。 */
 export function parsePuzzle(size, text) {
+  // 题面文本是这台计数器与 kenken.js 之间唯一共享的东西。第二参数必须是字符串：
+  // 递个 board 对象进来会被 String() 混成 "[object Object]"，一路当成奇怪的笼去报错，
+  // 那是假象不是答案——这里直接把话说明白。
+  if (typeof text !== 'string') throw new Error('计数器只吃题面文本，不接受 board 对象（第二参数得是字符串）');
   const n = size * size;
   const cages = [];
   const cageOf = new Int8Array(n).fill(-1);
-  for (const chunk of String(text).split(';')) {
+  for (const chunk of text.split(';')) {
     const colon = chunk.indexOf(':');
     const op = chunk.slice(0, colon);
     const target = Number(op.slice(1));

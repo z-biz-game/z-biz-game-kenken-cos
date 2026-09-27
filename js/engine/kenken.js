@@ -207,7 +207,7 @@ export function createBoard(spec) {
   for (const cage of board.cages) {
     const probe = cageAssignments(cage, size, null, { budget: 4000 });
     if (!probe.capped && !probe.list.length) {
-      throw new Error(`${board.cageName(cage.i)}「${cage.label}」在 1..${size} 内根本凑不出来`);
+      throw new Error(`${board.cageName(cage.i)}在 1..${size} 内根本凑不出来`);
     }
   }
   return board;
@@ -345,38 +345,52 @@ export function cageMultisets(cage, size) {
   return out.sort((x, y) => (x.join(',') < y.join(',') ? -1 : 1));
 }
 
-/** 笼的和/积可达区间（不做枚举）：规则 ② 的全部家当。界是松弛的，只会少排除。 */
+/**
+ * 笼的和/积/差/商**可达区间**：规则 ② 的全部家当。
+ *
+ * 两格笼给**精确**区间：把两格的候选两两配对算一遍，同行同列的配对先跳过（那是数独约束，
+ * 不是这个笼的道理——留着就会报出「1+1=2」这种根本填不出来的下界），除不尽的对也跳过。
+ * 三格及以上给**放宽**的区间（每格各取候选的最小/最大再相加/相乘）：界只可能比真值更宽，
+ * 规则 ② 于是永远只是少排除、不错排除；精确的组合归规则 ③。
+ * `empty: true` 说的是「这个笼在现在的候选下连一种结果都算不出来」，它包含某一格候选被挤空。
+ */
 export function cageRange(cage, size, mask) {
-  const doms = cage.cells.map((t) => valuesOfMask(mask[t] & fullMask(size)));
+  const cells = cage.cells;
+  const doms = cells.map((t) => valuesOfMask(mask[t] & fullMask(size)));
   if (doms.some((d) => !d.length)) return { empty: true };
-  const sum = (a) => a.reduce((x, y) => x + y, 0);
-  const mul = (a) => a.reduce((x, y) => x * y, 1);
-  if (cage.op === '+') return { empty: false, lo: sum(doms.map((d) => d[0])), hi: sum(doms.map((d) => d[d.length - 1])) };
-  if (cage.op === '*') return { empty: false, lo: mul(doms.map((d) => d[0])), hi: mul(doms.map((d) => d[d.length - 1])) };
-  if (cage.op === '-') {
+  const op = cage.op;
+  if (cells.length === 2) {
+    const clash = Math.floor(cells[0] / size) === Math.floor(cells[1] / size) || cells[0] % size === cells[1] % size;
     let lo = Infinity;
     let hi = -Infinity;
-    for (const a of doms[0]) for (const b of doms[1]) {
-      const d = Math.abs(a - b);
-      if (d < lo) lo = d;
-      if (d > hi) hi = d;
-    }
-    return { empty: false, lo, hi };
-  }
-  if (cage.op === '/') {
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const a of doms[0]) for (const b of doms[1]) {
-      const x = Math.max(a, b);
-      const y = Math.min(a, b);
-      if (y > 0 && x % y === 0) {
-        lo = Math.min(lo, x / y);
-        hi = Math.max(hi, x / y);
+    let any = false;
+    for (const a of doms[0]) {
+      for (const b of doms[1]) {
+        if (clash && a === b) continue;
+        let v;
+        if (op === '+') v = a + b;
+        else if (op === '*') v = a * b;
+        else if (op === '-') v = Math.abs(a - b);
+        else {
+          const x = a > b ? a : b;
+          const y = a > b ? b : a;
+          if (y <= 0 || x % y !== 0) continue;
+          v = x / y;
+        }
+        any = true;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
       }
     }
-    return lo === Infinity ? { empty: true } : { empty: false, lo, hi };
+    return any ? { empty: false, lo, hi } : { empty: true };
   }
-  return { empty: false, lo: doms[0][0], hi: doms[0][doms[0].length - 1] };
+  const sum = (a) => a.reduce((x, y) => x + y, 0);
+  const mul = (a) => a.reduce((x, y) => x * y, 1);
+  if (op === '+') return { empty: false, lo: sum(doms.map((d) => d[0])), hi: sum(doms.map((d) => d[d.length - 1])) };
+  if (op === '*') return { empty: false, lo: mul(doms.map((d) => d[0])), hi: mul(doms.map((d) => d[d.length - 1])) };
+  if (op === '=') return { empty: false, lo: doms[0][0], hi: doms[0][doms[0].length - 1] };
+  // 减与除只用于两格笼（createBoard 把关），到这里不可能走到
+  return { empty: true };
 }
 
 // ---- 四条铅笔规则 ---------------------------------------------------------------
@@ -416,6 +430,7 @@ export const Rules = {
 };
 
 export const RULE_LIST = [Rules.unit, Rules.bounds, Rules.combo, Rules.pack];
+export const ruleByKey = (k) => RULE_LIST.find((r) => r.key === k);
 export const ASSIGN_BUDGET = 3000;
 
 /**
@@ -516,13 +531,21 @@ const say = (board, rec) =>
 /**
  * 一轮扫描：四条规则按 ①②③④ 的次序各跑一遍（后面的规则看得见前面刚改过的掩码）。
  * 返回 { changed, found, conflict, stats }。
+ *
+ * `opts` 上挂着两个只给测试用的闸，出货路径一个都不传：
+ *   rules  —— 想证明某条规则真的在养活货盘，就把别的都留下、只拿掉它；
+ *   budget —— 把笼的赋值枚举预算压到 1，等价于「这个笼封顶了，规则③一个字都不说」，
+ *             用它实测规则②到底是③的简化版还是兜底版。实测口径（测试 A「分工」里钉着）：
+ *             出货的 20 关**一个笼都没触顶**（capped 全 0，七阶也不例外），所以②在货上不是
+ *             完成所必需的；可一旦把③的枚举压到 1，20/20 关都变成「留着②才推得完」——
+ *             ②是③封顶时的兜底，不是③的缩略版。
  */
 export function propagate(board, st, opts = {}) {
   const out = [];
   const stats = { enumerated: 0, capped: 0 };
-  for (const rule of RULE_LIST) {
+  for (const rule of opts.rules || RULE_LIST) {
     if (st.dead >= 0 || st.locked) break;
-    const r = RULE_RUN[rule.key](board, st, out, stats);
+    const r = RULE_RUN[rule.key](board, st, out, stats, opts);
     if (r.conflict) return { changed: true, found: [], conflict: r.conflict, rule: rule.name, cage: r.cage, unit: r.unit };
   }
   if (st.locked) return { changed: true, found: [], conflict: st.lockNote, rule: '前提' };
@@ -581,11 +604,11 @@ function runBounds(board, st, out) {
   for (const cage of board.cages) {
     if (cage.cells.every((t) => st.val[t])) continue;
     const rg = cageRange(cage, board.size, st.mask);
-    if (rg.empty) return { conflict: `${board.cageName(cage.i)}「${cage.label}」里有一格已经没有候选`, cage: cage.i };
-    if ((cage.op === '+' || cage.op === '*') && (cage.target < rg.lo || cage.target > rg.hi)) {
+    if (rg.empty) return { conflict: emptyCageNote(board, st, cage), cage: cage.i };
+    if (cage.target < rg.lo || cage.target > rg.hi) {
       const word = cage.target < rg.lo ? '最少都到 ' : '最多也只到 ';
       const edge = cage.target < rg.lo ? rg.lo : rg.hi;
-      return { conflict: `${board.cageName(cage.i)}「${cage.label}」要凑 ${cage.target}，可它现在${cage.target < rg.lo ? '怎么填也' : ''}${word}${edge}`, cage: cage.i };
+      return { conflict: `${board.cageName(cage.i)}要凑 ${cage.target}，可它现在${cage.target < rg.lo ? '怎么填也' : ''}${word}${edge}`, cage: cage.i };
     }
     for (const t of cage.cells) {
       if (st.val[t]) continue;
@@ -594,10 +617,12 @@ function runBounds(board, st, out) {
         st.mask[t] = bit(v);
         const probe = cageRange(cage, board.size, st.mask);
         st.mask[t] = saved;
-        if (!probe.empty && (cage.target < probe.lo || cage.target > probe.hi)) {
+        if (probe.empty || cage.target < probe.lo || cage.target > probe.hi) {
           eliminate(st, t, v, out, {
             rule: Rules.bounds,
-            note: `${board.cageName(cage.i)}「${cage.label}」里这格若是 ${v}，整笼的${cage.op === '*' ? '积' : '和'}只能在 ${probe.lo}..${probe.hi}，够不着 ${cage.target}`,
+            note: probe.empty
+              ? `${board.cageName(cage.i)}里这格若是 ${v}，另外一格的候选就全被挤空了，${cage.target} 无从算起`
+              : `${board.cageName(cage.i)}里这格若是 ${v}，整笼的${word2Op(cage.op)}只能在 ${probe.lo}..${probe.hi}，够不着 ${cage.target}`,
           });
         }
       }
@@ -606,35 +631,44 @@ function runBounds(board, st, out) {
   return {};
 }
 
+/** 一格里候选被挤空 vs 整个笼算不出任何结果：两种病分开说。 */
+function emptyCageNote(board, st, cage) {
+  const dead = cage.cells.find((t) => !st.mask[t]);
+  if (dead != null) return `${board.cellName(dead)} 已经没有任何候选：${board.cageName(cage.i)} 与同行同列一起把它挤空了`;
+  return `${board.cageName(cage.i)}在现在的候选下连一种结果都算不出来`;
+}
+
+const word2Op = (op) => (op === '*' ? '积' : op === '-' ? '差' : op === '/' ? '商' : '和');
+
 // ---- 规则 ③：笼的候选组合枚举 ---------------------------------------------------
 //
 // 枚举这个笼的全部合法赋值（含同笼同行同列不能同值），然后：
 //   * 一种都没有 → 矛盾；
 //   * 某值在所有组合里都落在同一格 → 那一格就是它；
 //   * 某值一次都不出现在某一格 → 那一格排除它。
-// README 里 `×24` 三格笼例子的出处：6 阶只有 {1,4,6} 与 {2,3,4} 两种多重集，交集里没有 5，
-// 所以 5 不能落进这个笼。
+// README 里 `×24` 三格笼例子的出处：写成横排三格时 6 阶只有 {1,4,6} 与 {2,3,4} 两种多重集
+// （两格同行还要互异，{2,2,6} 被数独约束拿掉），交集里没有 5，所以 5 不能落进这个笼。
 
-function assignmentsFor(board, st, cage) {
+function assignmentsFor(board, st, cage, budget) {
   // 缓存只按「这个笼有没有格子被写过」失效（touch 置 null），所以规则 ③ 与 ④ 共用一份表。
   const hit = st.cache[cage.i];
   if (hit) return hit;
-  const r = cageAssignments(cage, board.size, st.mask, { budget: ASSIGN_BUDGET });
+  const r = cageAssignments(cage, board.size, st.mask, { budget: budget || ASSIGN_BUDGET });
   st.cache[cage.i] = r;
   return r;
 }
 
-function runCombo(board, st, out, stats) {
+function runCombo(board, st, out, stats, opts = {}) {
   for (const cage of board.cages) {
     if (cage.cells.every((t) => st.val[t])) continue;
-    const a = assignmentsFor(board, st, cage);
+    const a = assignmentsFor(board, st, cage, opts.budget);
     stats.enumerated += a.tried;
     if (a.capped) {
       stats.capped++;
       continue; // 预算封顶：这一轮对这个笼不下结论，交给 ②④
     }
     if (!a.list.length) {
-      return { conflict: `${board.cageName(cage.i)}「${cage.label}」在现在的候选下一种组合都凑不出来`, cage: cage.i };
+      return { conflict: `${board.cageName(cage.i)}在现在的候选下一种组合都凑不出来`, cage: cage.i };
     }
     const summary = comboSummary(a.list);
     for (let i = 0; i < cage.cells.length; i++) {
@@ -645,10 +679,10 @@ function runCombo(board, st, out, stats) {
       const gone = valuesOfMask(st.mask[t] & ~union);
       if (gone.length) {
         for (const v of gone) {
-          eliminate(st, t, v, out, { rule: Rules.combo, note: `${board.cageName(cage.i)}「${cage.label}」只有 ${summary} 这几种组合，里面没有 ${v}` });
+          eliminate(st, t, v, out, { rule: Rules.combo, note: `${board.cageName(cage.i)}只有 ${summary} 这几种组合，里面没有 ${v}` });
         }
         if (st.mask[t] && onlyValue(st.mask[t]) && !st.val[t]) {
-          place(st, t, onlyValue(st.mask[t]), Rules.combo, `${board.cageName(cage.i)}「${cage.label}」的组合里这一格只剩 ${onlyValue(st.mask[t])}`, out);
+          place(st, t, onlyValue(st.mask[t]), Rules.combo, `${board.cageName(cage.i)}的组合里这一格只剩 ${onlyValue(st.mask[t])}`, out);
         }
       }
     }
@@ -657,7 +691,7 @@ function runCombo(board, st, out, stats) {
       const t = cage.cells[i];
       if (st.val[t]) continue;
       const first = a.list[0][i];
-      if (a.list.every((as) => as[i] === first)) place(st, t, first, Rules.combo, `${board.cageName(cage.i)}「${cage.label}」的每一种组合里，这一格都是 ${first}`, out);
+      if (a.list.every((as) => as[i] === first)) place(st, t, first, Rules.combo, `${board.cageName(cage.i)}的每一种组合里，这一格都是 ${first}`, out);
     }
   }
   return {};
@@ -685,24 +719,24 @@ export function comboSummary(list) {
 //   * 某个笼的可用贡献被窗口收窄 → 用收窄后的贡献反推每一格还能是什么。
 // 这一步用的是**跨笼**事实，前三条谁也替代不了它。
 
-function runPack(board, st, out, stats) {
+function runPack(board, st, out, stats, opts = {}) {
   const T = board.total;
   for (const unit of board.units) {
     const groups = [];
     for (const cage of board.cages) {
       const slot = cage.cells.map((t, i) => (unit.cells.includes(t) ? i : -1)).filter((i) => i >= 0);
       if (!slot.length) continue;
-      const a = assignmentsFor(board, st, cage);
+      const a = assignmentsFor(board, st, cage, opts.budget);
       stats.enumerated += a.tried;
       const contrib = new Map();
       let relaxed = false;
       if (a.capped) {
         relaxed = true;
         const rg = cageRange(cage, board.size, st.mask);
-        if (rg.empty) return { conflict: `${board.cageName(cage.i)}「${cage.label}」里有一格已经没有候选`, cage: cage.i };
+        if (rg.empty) return { conflict: emptyCageNote(board, st, cage), cage: cage.i };
         for (let s = rangeSum(cage.cells, st, slot, 'lo'); s <= rangeSum(cage.cells, st, slot, 'hi'); s++) contrib.set(s, null);
       } else {
-        if (!a.list.length) return { conflict: `${unit.name} 里的 ${board.cageName(cage.i)}「${cage.label}」一个组合都放不进来`, cage: cage.i, unit: unit.key };
+        if (!a.list.length) return { conflict: `${unit.name} 里的 ${board.cageName(cage.i)}一个组合都放不进来`, cage: cage.i, unit: unit.key };
         for (const as of a.list) {
           let s = 0;
           for (const i of slot) s += as[i];
@@ -736,7 +770,7 @@ function runPack(board, st, out, stats) {
         for (const v of valuesOfMask(st.mask[t] & ~union)) {
           eliminate(st, t, v, out, {
             rule: Rules.pack,
-            note: `${unit.name} 的和必须是 ${T}，${board.cageName(g.cage.i)}「${g.cage.label}」在这一${unit.kind === 'row' ? '行' : '列'}里只能贡献 ${allowed.join('/')}`,
+            note: `${unit.name} 的和必须是 ${T}，${board.cageName(g.cage.i)}在这一${unit.kind === 'row' ? '行' : '列'}里只能贡献 ${allowed.join('/')}`,
           });
         }
         void cellsInUnit;
@@ -780,6 +814,7 @@ export function solve(board, opts = {}) {
     rounds: 0,
     capped: 0,
     breakdown: {},
+    masks: Uint16Array.from(st.mask),
     solution: null,
     trace: st,
   });
@@ -791,8 +826,9 @@ export function solve(board, opts = {}) {
   let rounds = 0;
   let level = 0;
   let conflict = null;
+  const activeRules = opts.rules || RULE_LIST;
   for (;;) {
-    const sweep = propagate(board, st);
+    const sweep = propagate(board, st, { rules: activeRules, budget: opts.budget });
     if (sweep.conflict) {
       conflict = sweep.conflict;
       break;
@@ -816,19 +852,26 @@ export function solve(board, opts = {}) {
   for (const x of weights.values()) score += x.n * x.weight;
   score += rounds * 0.5 + Math.floor(enumCost / 500);
   if (!filled && !conflict) conflict = '四条铅笔规则推不完这一盘';
+  // 「每格都有数字」不等于「推对了」：把一只算错的满盘当前提塞进来，规则照样会在某一轮
+  // 撞上笼级矛盾。这时候哪怕盘是满的，也绝不报 ok、绝不交出 solution——
+  // reachable()/提示/验收全都指这一点，冤枉人的话它不说，蒙对的事它也不认。
+  const ok = filled && !conflict;
   return {
-    ok: filled,
-    solution: filled ? Uint8Array.from(st.val) : null,
+    ok,
+    solution: ok ? Uint8Array.from(st.val) : null,
+    // 推到底（或推不下去）时每一格还剩哪些候选。界面用它把「引擎已证明不可能」的
+    // 铅笔候选画暗，玩家自己决定要不要擦掉——引擎不替他擦。
+    masks: Uint16Array.from(st.mask),
     rows,
     steps: places,
     elims,
-    score: filled ? Math.round(score * 10) / 10 : 0,
+    score: ok ? Math.round(score * 10) / 10 : 0,
     level,
     enumCost,
     rounds,
     capped,
     breakdown: Object.fromEntries([...weights].map(([k, v]) => [k, v.n])),
-    conflict: filled ? null : conflict,
+    conflict: ok ? null : conflict,
     trace: st,
   };
 }
@@ -913,14 +956,14 @@ export function diagnose(board, val) {
       else {
         badCages.add(cage.i);
         for (const t of cage.cells) dup.add(t);
-        notes.push(`${board.cageName(cage.i)}「${cage.label}」现在算出 ${explainAttempt(cage, vals)}，对不上 ${cage.target}`);
+        notes.push(`${board.cageName(cage.i)}现在算出 ${explainAttempt(cage, vals)}，对不上 ${cage.target}`);
       }
       continue;
     }
     if (!canStillHold(board, cage, vals)) {
       badCages.add(cage.i);
       for (let i = 0; i < vals.length; i++) if (vals[i] >= 1) dup.add(cage.cells[i]);
-      notes.push(`${board.cageName(cage.i)}「${cage.label}」填下去就已经凑不出 ${cage.target}`);
+      notes.push(`${board.cageName(cage.i)}填下去就已经凑不出 ${cage.target}`);
     }
   }
   return {
@@ -943,7 +986,9 @@ export function canStillHold(board, cage, vals) {
   const fixed = vals.filter((v) => v >= 1);
   const rest = vals.length - fixed.length;
   if (!rest) return cageHolds(cage.op, cage.target, vals, size);
-  if (cage.op === '=') return false;
+  // 单格定值笼还空着：只要目标数在盘上合法就来得及（createBoard 保证 1..N，越界的那一类
+  // 在这里一并挡掉）。空着 ≠ 凑不出——说「凑不出」是冤枉玩家。
+  if (cage.op === '=') return cage.target >= 1 && cage.target <= size;
   if (cage.op === '+') {
     const s = fixed.reduce((a, v) => a + v, 0);
     return cage.target >= s + rest && cage.target <= s + rest * size;
@@ -954,7 +999,12 @@ export function canStillHold(board, cage, vals) {
     const need = cage.target / p;
     return need >= 1 && need <= size ** rest;
   }
-  // − 与 ÷ 只会是两格笼，到这里必然是一格已填一格空
+  // − 与 ÷ 只会是两格笼：一格已填就顺着它试，**两格都空着时不能拿 fixed[0] 说话**
+  // （那时候它还不存在，`[undefined, x]` 什么都算不出，就会把一只好端端的空笼判成死笼）。
+  if (!fixed.length) {
+    for (let x = 1; x <= size; x++) for (let y = 1; y <= size; y++) if (cageHolds(cage.op, cage.target, [x, y], size)) return true;
+    return false;
+  }
   const a = fixed[0];
   for (let x = 1; x <= size; x++) if (cageHolds(cage.op, cage.target, [a, x], size)) return true;
   return false;
