@@ -45,6 +45,10 @@ export function encodeRuns(list) {
   return out.join('.');
 }
 
+// 一格装得下的最大值：墨水 0..9，候选掩码最多 fullMask(9) = 1022。超出这个数就不是
+// 「一格的值」，整段按脏处理——Uint16Array 会把 70000 悄悄绕回 4464，那是替玩家变出一张盘。
+const MAX_CELL = 1023;
+
 export function decodeRuns(text, len) {
   const out = new Uint16Array(len);
   if (typeof text !== 'string' || !text) return out;
@@ -54,10 +58,30 @@ export function decodeRuns(text, len) {
     const x = seg.indexOf('x');
     const v = parseInt(x < 0 ? seg : seg.slice(0, x), 36);
     const c = x < 0 ? 1 : parseInt(seg.slice(x + 1), 36);
-    if (!Number.isFinite(v) || !Number.isFinite(c) || c < 1) continue; // 脏段：跳过，不整串作废
+    const countable = Number.isFinite(c) && c >= 1;
+    // 脏段：跳过它**占的那几格**（留 0），后面的段留在原来的位置上。
+    // 游标不推进就等于把后半串整体往左挪一格——那才是「静默变出一张不同的盘」。
+    if (!Number.isFinite(v) || v < 0 || v > MAX_CELL || !countable) {
+      if (countable) i += Math.min(c, len - i);
+      continue;
+    }
     for (let k = 0; k < c && i < len; k++) out[i++] = v;
   }
   return out;
+}
+
+/** 这段游程编码**声称**盖了多少格；连数目都算不出来（段长是垃圾）就返回 -1，绝不猜。 */
+function runsCover(text) {
+  if (typeof text !== 'string' || !text) return 0;
+  let total = 0;
+  for (const seg of text.split('.')) {
+    const x = seg.indexOf('x');
+    const c = x < 0 ? 1 : parseInt(seg.slice(x + 1), 36);
+    if (!Number.isFinite(c) || c < 1) return -1;
+    total += c;
+    if (total > 1e6) return -1;
+  }
+  return total;
 }
 
 // ---- 存储访问：拿不到就当没有 -------------------------------------------------------
@@ -152,10 +176,16 @@ export function sanitize(raw) {
 
   const r = raw.resume;
   if (r && typeof r === 'object') {
-    const size = num(r.size, 2, 9, 0);
+    // size 是这张盘的骨架：越界就**整份丢掉**，不许钳到合法值再拿原来的墨水去配另一张盘——
+    // 存档里的 ref/种子说的是 4 阶的题面，钳成 9 阶就照着 81 格去画一张 16 格的局。
+    const rawSize = Number(r.size);
+    const size = Number.isInteger(rawSize) ? rawSize : 0;
     const len = size * size;
     // 长度对不上就是题面和墨水不是同一张盘——丢掉，别去猜哪一边错。
-    if (size >= 2 && len <= 81 && typeof r.ink === 'string' && r.ink.length <= 600) {
+    // 编码**盖过** len 格是截断（多出来的格子本来就画不下，前面的位置不受影响）；
+    // 盖**不足** len 格则是断档：补 0 等于把玩家填过的格子悄悄擦掉，那是另一张盘。
+    const cover = runsCover(r.ink);
+    if (size >= 2 && len <= 81 && cover >= len && typeof r.ink === 'string' && r.ink.length <= 600) {
       const ink = decodeRuns(r.ink, len);
       const notes = decodeRuns(typeof r.notes === 'string' ? r.notes : '', len);
       let bad = false;
@@ -307,6 +337,10 @@ export const Store = {
     const r = this.data.resume;
     if (!r) return null;
     const len = r.size * r.size;
+    // inkCells / noteCells **总是** size*size 长：sanitize 已经保证这份编码至少盖得住
+    // 这么多格（盖得更多就截断），所以这里解码不存在补洞。js/ui/game.js 的 setPuzzle
+    // 只接受 `keep.ink.length === board.n`，短一格它就把整串墨水悄悄丢掉——
+    // 长度必须由存档这边保证，不能留给界面猜。
     return { ...r, inkCells: decodeRuns(r.ink, len), noteCells: decodeRuns(r.notes, len) };
   },
 
