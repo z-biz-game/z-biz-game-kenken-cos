@@ -49,8 +49,8 @@ export class Game extends EventTarget {
     this.moves = 0;
     this.hints = 0;
     this.hintLog = [];
-    this.lastHintKey = ''; // 上一次念出来的那条结论（内容身份，连着按提示不许重复同一句话）
-    this.lastHintStamp = ''; // 它的盘面签名：签名没变才谈得上「刚念过」
+    this.hintRecent = []; // 最近念过的结论（内容身份，FIFO 最多 8 条）：连着按不许重复同一句话
+    this.hintStamp = ''; // 它们属于哪个盘面签名：签名一变（落子/铅笔/换选中格）就清零
     this.startedAt = now();
     this.pausedMs = 0;
     this.won = false;
@@ -378,24 +378,29 @@ export class Game extends EventTarget {
     let row = pickUnrealized(rows, this.ink, this.notes, this.sel);
     let suffix = row ? null : '（这一步你已经做过了，接着往下想）';
     if (!row) row = rows[0];
-    // 连着要提示不许念同一句话：盘面没动（推导的签名一模一样）、看的还是同一格，
-    // 那第二条就必须往前走——顺着推导往下找一条不是刚念过的，走到末尾再绕回开头。
-    // 玩家一旦落子/记铅笔/换选中格，签名就变了，重新开始念。
+    // 连着要提示不许念同一句话：只要盘面没动（推导签名一模一样）、看的还是同一格，
+    // 每条新答案都得躲开**最近念过的那一串**，顺着推导往下找一条没念过的；
+    // 记满了就松开最老的一条（宁可绕回来，也不许一按就什么都不给）。
+    // 玩家一旦落子/记铅笔/换选中格，签名变化，记忆清零重新开始念。
     // 比对只能按**内容**比：derive(true) 每次都重算，rows 里的对象是新生成的，比 `===` 永远不等。
+    // 只躲"上一条"是不够的：第三次按下去会绕回第一条，同一句话隔一轮又念一遍。
     const stamp = `${b.text}|${d.sig}|${this.sel}`;
-    const key = hintKey(row);
-    if (key === this.lastHintKey && stamp === this.lastHintStamp) {
+    if (stamp !== this.hintStamp) {
+      this.hintStamp = stamp;
+      this.hintRecent = [];
+    }
+    if (this.hintRecent.includes(hintKey(row))) {
       const from = rows.indexOf(row);
       for (let k = 1; k < rows.length; k++) {
         const alt = rows[(from + k) % rows.length];
-        if (hintKey(alt) === key) continue;
+        if (this.hintRecent.includes(hintKey(alt))) continue;
         row = alt;
         suffix = realized(alt, this.ink, this.notes) ? '（这一步你已经做过了，接着往下想）' : null;
         break;
       }
     }
-    this.lastHintKey = hintKey(row);
-    this.lastHintStamp = stamp;
+    if (this.hintRecent.length >= 8) this.hintRecent.shift();
+    this.hintRecent.push(hintKey(row));
     return this.charge(row, suffix);
   }
 
