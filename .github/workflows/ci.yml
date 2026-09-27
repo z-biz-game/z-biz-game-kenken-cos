@@ -46,3 +46,43 @@ jobs:
 
       - name: Entry files exist
         run: test -f index.html && grep -q '<canvas' index.html && grep -q 'js/main.js' index.html
+
+      # What the five steps above do NOT cover: the page actually booting in a real browser
+      # (no uncaught exceptions, the canvas pixels matching what the geometry claims, a dirty
+      # save file, a click landing on a control that is there but covered). That is the
+      # `browser` job below — until it existed, tools/verify.sh had never been run by CI.
+
+  # 648 browser assertions (five scenarios x two URL shapes), measured 2026-09-28: root 42+37+15
+  # +135+95 = 324 with 0 failed, prefix the same 324 with 0 failed, whole run 17.5 s locally.
+  # A gate that is only ever run by hand is documentation, not a gate. One invocation covers both
+  # shapes because Pages serves us under /z-biz-game-kenken-cos/, and a failed page-relative
+  # import used to be invisible: it aborts the scenario mid-way and the shape reports green.
+  browser:
+    name: real browser gate (both URL shapes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        # 22, not the 20 the check job uses: tools/playtest.cjs is a raw CDP driver written
+        # against Node's global WebSocket/fetch, which only exist from 22 on. On 20 the first
+        # attach dies with "WebSocket is not defined" and the job goes red before a single
+        # assertion runs.
+        with:
+          node-version: 22
+      # ubuntu-latest ships google-chrome on PATH, which is what tools/verify.sh looks for
+      # (alongside the macOS bundle path). No install step: apt/dpkg on a pinned image is a
+      # flake source, and a step that can die of networking reads as "the game is broken".
+      # Nothing here measures a real window, so the job needs no xorg / no window manager:
+      # playtest.cjs launches Chrome with --window-size=1280,1024 and never touches
+      # Emulation.setDeviceMetricsOverride. The narrow case in the ui scenario is done the way
+      # the product actually reads width — set canvas.style.width, dispatch `resize`, and let
+      # measure() re-run its formula against getBoundingClientRect() (js/render/board.js:20-22).
+      # That is also why the geometry numbers can be asserted verbatim on Linux.
+      - name: Browser gate (root + prefix)
+        env:
+          # verify.sh's own watchdog default is 600 s (tools/verify.sh:80); the local both-shape
+          # run is 17.5 s, so this is headroom for a shared runner, not a budget the gate is
+          # graded against. Raising it cannot turn a red gate green — it only stops the watchdog
+          # from killing a run that is merely slow.
+          WD_TIMEOUT: 900
+        run: bash tools/verify.sh
