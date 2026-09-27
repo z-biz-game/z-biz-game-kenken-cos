@@ -134,7 +134,7 @@ run_shape() {
   echo "boot: kenken $BOOT at $BASE"
   [ "$BOOT" = "nope" ] && { echo "window.kenken never appeared at $BASE" >&2; exit 4; }
 
-  for s in ${SCENARIOS:-first engine fingerprint}; do
+  for s in ${SCENARIOS:-first engine fingerprint play ui}; do
     echo "=== [$name] $s ==="
     node tools/playtest.cjs scenario "$s" 2>/tmp/kenken-$name-$s.console.log | tail -1 | sed 's/^RESULT //' | python3 -c "
 import sys, json

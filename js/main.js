@@ -368,10 +368,15 @@ game.addEventListener('note', (e) => {
   persist();
 });
 
+// 「擦掉已死候选」改的是 `game.notes`，而 notes 就是存档的一部分（Store.saveResume 存 ink+notes）——
+// 所以它必须和 ink/note/erase/undo 一样落盘。少这一句的后果是**存档停在清理之前**：玩家擦完候选
+// 直接关标签页，下次进来那笔已经出局的候选又活了（浏览器闸「铅笔编码反解回来与棋盘逐格相同」
+// 抓的就是这个：盘上 notes[8]=0，档里解出来还是 16）。
 game.addEventListener('prune', (e) => {
   say(`${game.board.cellName(e.detail.cell)} 擦掉了 ${e.detail.removed} 个已经不可能出现的候选。`, 'good');
   refresh();
   markDirty();
+  persist();
 });
 
 game.addEventListener('erase', () => {

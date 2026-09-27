@@ -1148,6 +1148,24 @@ gq.setPuzzle({ size: 3, text: b3.text, tier: 'newcomer', ref: 'test-prune' });
 gq.select(0);
 gq.notes[0] = fullMask(3);
 eq('清理铅笔：把引擎证明不可能的候选拿掉', (gq.pruneNotes(0), valuesOfMask(gq.notes[0])), [1]);
+eq('清理铅笔不计步', gq.moves, 0);
+// 计费的不对称必须在撤销这一头补齐：pruneNotes 进栈（撤得回）但不 moves++，
+// 于是 undo 若无条件退一步，玩家就能用「清理铅笔 + 撤销」成对地把 moves 压到
+// 实际落子数以下——而 moves 是 Store.recordBest 的同分比较项（js/store.js:251），
+// 也是胜利面板上那句「步数 N」。步数会进纪录的数，就不许是能被白送的。
+eq('撤掉那一次清理照样撤得回', (gq.undo(), valuesOfMask(gq.notes[0])), [1, 2, 3]);
+eq('撤掉一笔不收费的动作，步数不许凭空退减', gq.moves, 0);
+gq.notes[0] = 0;
+gq.inkValue(0, 1);
+eq('落子计一步（写侧的计费口径没被改坏）', gq.moves, 1);
+eq('撤掉一笔收费的动作，退的就是那一步', (gq.undo(), gq.moves), 0);
+gq.notes[0] = 0;
+for (let k = 0; k < 5; k++) {
+  gq.notes[0] = fullMask(3);
+  gq.pruneNotes(0);
+  gq.undo();
+}
+eq('清理+撤销连做五对，步数仍是 0（白送的路径封死）', gq.moves, 0);
 
 head('C 状态机 · 胜利判定与战役');
 const gw = new Game();

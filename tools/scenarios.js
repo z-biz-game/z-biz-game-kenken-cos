@@ -1,6 +1,6 @@
 // 浏览器侧场景套件。由 tools/playtest.cjs 注入到真实页面里跑。
 //
-// 断言纪律（js/main.js:696 那句「harness 表面：tools/scenarios.js 只读这些」就是契约）：
+// 断言纪律（js/main.js:701 那句「harness 表面：tools/scenarios.js 只读这些」就是契约）：
 // 读 DOM 几何与画布像素，不读内部标志位。点一格要真的 dispatch PointerEvent、落子要真的走
 // 键盘/按钮、存档要真的从 localStorage 反解回来比对。每个失败都打「当前值 vs 期望值」，
 // 每个通过也带着实测数字（坐标、像素计数、游程编码长度）。
@@ -539,7 +539,7 @@
     eq('非法落子不收费', text('#stat-hints'), '0');
     eq('非法落子从不产生冲突格（因为压根没落上）', st().conflicts, 0);
     eq('非法落子之后诊断口径仍是「没有对不上的笼」', st().badCages.length, 0);
-    // 键盘那条路对盘外数字是「什么都不做」，不是「按了再被拒」（js/main.js:527 的 v<=size 闸）
+    // 键盘那条路对盘外数字是「什么都不做」，不是「按了再被拒」（js/main.js:582 的 v<=size 闸）
     A().select(2);
     const lineBefore = text('#state-line');
     await key(String(size + 1));
@@ -568,8 +568,14 @@
     eq('右上角往下 = +size', st().selected, 2 * size - 1);
     await key('ArrowDown');
     eq('再往下仍是 +size', st().selected, 3 * size - 1);
+    // 手算这一格在哪：3*size-1 = 11 = 行号 2、列号 3（行号从 0 数起），离底还有一行。
+    // game.move('down') 走的是 r = Math.min(size-1, r+1)（js/ui/game.js:260），size=4 时
+    // 最后一行是 r=3 → t = 4*size-1 = 15 = n-1。原来这条把「3*size-1」当成了底，
+    // 于是「S 撞不出去」在还差一行的时候就宣判了——实测 15 是对的，错的是 want。
     await key('s');
-    eq('S 到底了也撞不出去（行号钳在 size-1）', st().selected, 3 * size - 1);
+    eq('S 与 ↓ 同一条路（还差一行到底，照样 +size）', st().selected, n - 1);
+    await key('s');
+    eq('S 到底了也撞不出去（行号钳在 size-1）', st().selected, n - 1);
     A().select(n - 1);
     await key('ArrowDown');
     await key('ArrowRight');
@@ -578,7 +584,13 @@
     eq('右下角往下/往右都不越界', st().selected, n - 1);
     const gsel = A().geometry();
     const rcLast = gsel.cells[n - 1];
-    eq('选中的那一格几何上确实在最后一行最后一列', `${rcLast.r},${rcLast.c},${rcLast.y + rcLast.s}`, `${size - 1},${size - 1},${gsel.top + size * gsel.cell}`);
+    // 读数字段查过了：harness 表面上的 geometry().cells[t] 只有 {t,x,y,s,cx,cy}
+    //（js/render/board.js:398 那一行构造的就是这六个字段），**没有** r/c——渲染器内部的
+    // cellRect 才有 r/c，它没往外给。所以 rcLast.r 读出来是 undefined（实测那格打印成
+    // "undefined,undefined,236"）。行列按同一份几何反算：r = (y-top)/cell、c = (x-left)/cell。
+    const lastRow = Math.round((rcLast.y - gsel.top) / gsel.cell);
+    const lastCol = Math.round((rcLast.x - gsel.left) / gsel.cell);
+    eq('选中的那一格几何上确实在最后一行最后一列', `${lastRow},${lastCol},${rcLast.y + rcLast.s}`, `${size - 1},${size - 1},${gsel.top + size * gsel.cell}`);
 
     // 5) 铅笔：是玩家自己的记号，引擎不替玩家写也不替玩家擦
     await click('#btn-note');
@@ -588,7 +600,17 @@
     const noteCell = board.cages.find((c) => c.cells.length > 1).cells[1]; // +4 笼的第二格
     A().select(noteCell);
     const movesWithInk = Number(text('#stat-moves'));
-    eq('键盘跟着盘面走：这一格此刻填不上 2 和 4（笼 +4 与同列的第 1 格）', offKeys(), '2,4');
+    // 这一格（格 8，笼「4+」的第二格）此刻填不上哪些数字，由独立计数器 js/engine/count.js
+    // 逐值穷举裁决过（tools/_tmp 探针跑的结果，写在提交正文里）：往题面里追加「格 8 = v」再数解，
+    // v=1 → 0 解、v=2 → 0 解、v=3 → 1 解、v=4 → 0 解，所以键盘该划掉 1、2、4 三档。
+    // 手算同一件事（只用题面自己的四条线索）：
+    //   · 第 2 行（格 4..7）里格 5 被单格定值笼「3」钉死、格 6 被「2」钉死 → 格 4 只剩 1 或 4；
+    //   · 第 1 列（格 0,4,8,12）里格 0 被「2」钉死、格 12 被「4」钉死 → 格 4 只剩 1 或 3；
+    //     两条一交 → 格 4 = 1；
+    //   · 笼「4+」= 格 4 + 格 8 = 4 → 格 8 = 3 是被迫的，1（同笼挤掉）、2（同列的格 0）、4（凑不出 4）
+    //     全都填不上。
+    // 原先的 want 只写了 2 与 4，漏了「格 4=1 顺着笼子把 1 也挤掉」这一层，是断言算错了。
+    eq('键盘跟着盘面走：这一格只剩 3 填得上，1、2、4 全被划掉', offKeys(), '1,2,4');
     await key('1');
     await key('4');
     eq('记两笔铅笔算两步', text('#stat-moves'), String(movesWithInk + 2));
@@ -619,7 +641,15 @@
     eq('提示也不替玩家填格子', ink().filter((v) => v).length, 2);
     eq('提示按了一次就收一次费', `${st().hints}/${text('#stat-hints')}/${text('#hint-count')}`, '1/1/1');
     ck('提示那条规则名是真的（四条之一）', st().hints === 1 && text('#hint-rule').length > 0, text('#hint-rule'));
-    eq('第 1 关一共 11 个笼（读数与题面同口径）', `${st().goodCages.length}/${board.cages.length}/${text('#stat-cages')}`, `0/11/0/11`);
+    // 这一条原来要 `0/11/0/11`，是断言自己数漏了：此刻盘上只有两笔墨（格 0=sol[0]=2、
+    // 格 4=sol[4]=1，见上面「点数字键（DOM 路径）也能落子」和「已落子读数」那两条），
+    // 但笼 10 是一个**单格定值笼**「=2:00」——它只盖格 0，填进去的又正是 2，
+    // 于是「填满且算式成立」这两件事它同时做到了，goodCages 里必须有它。
+    // 其余 10 个笼都不成立：笼 1「4+」=格 4+格 8，格 8 还是空的（这就是接下来「清理铅笔」
+    // 那段要用的前提）；剩下的笼各格全空。用引擎同一函数 `cageHolds` 在 node 侧复算：
+    // goodCages = [10]，count = 1（探针 _tmp-kenken-p4.mjs，只读 js/engine/kenken.js）。
+    // 所以「对上的笼/总笼」是 1/11，state 那边也同一口径 → 实测 `1/11/1/11` 才是对的。
+    eq('第 1 关一共 11 个笼（读数与题面同口径）', `${st().goodCages.length}/${board.cages.length}/${text('#stat-cages')}`, `1/11/1/11`);
 
     // 6) 清理铅笔真抹掉「已不可能」的那笔：第 mate 格落了子之后，noteCell 的候选被推到只剩解，
     //    玩家记的那笔 4 已经被证明出局——「清理铅笔」这一格该擦掉它，而且不动步数、不动墨水。
@@ -651,18 +681,26 @@
     ck('墨水串比一格一字符还短', raw.resume.ink.length <= n, `${raw.resume.ink} vs ${n} 格`);
 
     // 8) 撤销链条：退掉那次「清理铅笔」（它进了栈但不计步）、再退墨水、退到空盘之后如实拒绝。
-    //    注意一处记账不对称：pruneNotes 进了撤销栈却不 moves++，于是撤掉它的 undo 仍会
-    //    moves = max(0, moves-1) —— 落子 4 次 + 记笔 3 次 = 7 步，栈里 6 条，退完栈步数钳在 0。
-    //    这一条只断「擦掉的铅笔被还原」，步数不对称写进提交正文回报，不改判据。
+    //    记账口径是「谁收过费，谁才退得起」：pruneNotes 进栈（所以撤得回）却不 moves++
+    //    （js/ui/game.js:342），而 undo 读撤销帧上的 costs 才决定退不退那一步
+    //    （js/ui/game.js:357）。若它无条件退一步，「清理铅笔 + 撤销」就能成对白送步数——
+    //    而步数是写进 best 纪录的同分比较项（js/store.js:251），白送不得。
     const wantNoteBack = notes().slice();
     wantNoteBack[noteCell] = 1 << 4;
     const u1 = A().undo();
     eq('撤销返回明确结论', u1.ok, true);
     eq('撤销把擦掉的那笔铅笔还原', notes().join(','), wantNoteBack.join(','));
     eq('撤销把选中格也带回去', st().selected, noteCell);
+    eq('退掉那笔不收费的清理，步数一分不动', st().moves, movesBeforePrune);
+    // 再退一步退的才是 mate 那笔墨水（它当初收过一步）。先要这一格真的空了，
+    // 「撤回来之后还能重新做一遍、并且重新计步」才有得验——上一版直接重按同一个数字，
+    // 盘上墨水没被退掉，inkValue 头一行就静默返回（js/ui/game.js:289），一步都不加。
+    const uBackToInk = A().undo();
+    eq('再退一步退的是那笔墨水', `${uBackToInk.ok}/${ink()[mate]}`, `true/0`);
+    eq('退掉收费的那一笔，步数才减一', st().moves, movesBeforePrune - 1);
     await key(String(sol[mate]));
     eq('撤销之后重做同一格仍能落子', ink()[mate], sol[mate]);
-    eq('重做那一格重新计步', st().moves, movesBeforePrune + 1);
+    eq('重做那一格重新计步', st().moves, movesBeforePrune);
     let guard = 0;
     while ((ink().some((v) => v) || notes().some((v) => v)) && guard++ < 200) A().undo();
     eq('一路撤销能退回到空盘（墨水与铅笔全清）', `${ink().join(',')}|${notes().join(',')}`, `${zeros}|${zeros}`);
@@ -687,7 +725,16 @@
     ck('重开那句说明是界面写死的口径', /题面没变/.test(text('#state-line')), text('#state-line'));
     const rawEmpty = saved();
     eq('重开落盘的墨水就是全 0 的游程编码', rawEmpty.resume.ink, encodeRuns(new Uint8Array(n)));
-    eq('4 阶空盘的紧凑写法是 0x10（16 的 36 进制是 10）', encodeRuns(new Uint8Array(16)), '0x10');
+    // 编码格式查过了（js/store.js:35）：`${v.toString(36)}x${c.toString(36)}`，
+    // **值与个数都是 36 进制**，个数不是十进制串。所以 16 个 0 写作 `0xg`：
+    //   (16).toString(36) === 'g'，反过来 parseInt('g',36) === 16（解码端 js/store.js:60
+    //   用的正是 parseInt(...,36)）。原来那条把个数当十进制读成 `0x10`——而 `0x10` 解出来是
+    //   parseInt('10',36) = 36 格，比一张 6 阶盘还长，那才是坏档。
+    // 写侧的上限也印证这一点：游程合并的条件是 `n < 1296`，1296 = 36²（两位数 36 进制的容量）；
+    // 若个数是十进制两位串，上限该写成 99 而不是 1296。
+    eq('4 阶空盘的紧凑写法是 0xg（个数也走 36 进制，16 → "g"）', encodeRuns(new Uint8Array(16)), '0xg');
+    // 一写一解得回到同一张盘：只断串长会把「编码算错」一路带进存档。
+    eq('写出去还能原样读回来（0xg ↔ 16 个 0）', Array.from(decodeRuns('0xg', 16)).join(','), new Array(16).fill(0).join(','));
 
     // 10) 按真实键盘把整盘填对 → 判胜、写纪录、清续档
     for (let t = 0; t < n; t++) {
@@ -871,6 +918,18 @@
     // 回选档：菜单侧的控件同样要够大，隐藏起来的续档卡不参与统计
     A().showMenu();
     await wait(60);
+    // 原来这里直接断「没有存档时续档卡是隐藏的」，可**前提压根没建立**：openLevel(1) 开完盘，
+    // showMenu() 头一件事就是 persist()（js/main.js:285），localStorage 里必然躺着一份 resume，
+    // buildResume() 于是合法地把卡亮出来（js/main.js:246）——实测 hidden=false。
+    // 产品没错，是这条断言把「菜单刚打开」当成了「没有存档」。先把两种情形分开断：
+    ck('有可继续的那局时，续档卡就该露出来（showMenu 会先落一份档）', !!saved()?.resume && !$('#resume-card').hidden, JSON.stringify({ hasResume: !!saved()?.resume, hidden: $('#resume-card').hidden }));
+    // 清档只走产品自己那条路：把这局赢掉——赢的时候 Store.clearResume()（js/main.js:450），
+    // 之后 persist() 见 game.won 直接早退（js/main.js:336），不会再把它写回去。
+    A().fillSolution();
+    await wait(120);
+    ck('赢了就把「可继续的那局」清掉', (saved() || {}).resume == null, JSON.stringify((saved() || {}).resume));
+    await click('#btn-menu-2');
+    await wait(60);
     eq('对局视图整块隐藏', $('#view-game').hidden, true);
     eq('没有存档时续档卡是隐藏的', $('#resume-card').hidden, true);
     censusHidden('隐藏的续档卡', ['#resume-card', '#btn-resume']);
@@ -879,13 +938,27 @@
     eq('对局页控件数 = 4 个数字键 + 3 工具 + 5 动作 + 3 顶栏', gameCtl, size + 3 + 5 + 3);
     void total;
     $('.chapter[data-level="1"]').click();
-    await wait(80);
+    // 赢那一瞬间 renderer.celebrate() 起了一圈 900ms 的绿环（js/render/board.js:337 的 drawWin，
+    // 时长是 Motion.win），它按时间自灭。下一段 (d) 要取整盘像素，所以等它散干净再采样。
+    await wait(theme.Motion.win + 150);
     ck('点战役卡片回到对局页', shown('#view-game'), JSON.stringify({ game: shown('#view-game'), menu: shown('#view-menu') }));
 
     // ---- (d) 像素：画布真的被画了，而且画的就是那套几何 ------------------------------------------
     const painted = paintedPixels();
-    const fullArea = areaOf(g0.cssW, g0.cssH);
-    ck(`整盘像素真的落笔了（${painted}/${fullArea}）`, painted > fullArea * 0.5, `${painted}/${fullArea}`);
+    // 分母原来拿的是**整张画布** areaOf(cssW, cssH) = 710×248 = 176080，要求 painted 过半。
+    // 这在这个几何下压根做不到，而且和紧跟着的两条自相矛盾——那两条断的就是「角落 alpha=0、
+    // 角落颜色 0,0,0」，也就是左右两条留白必须是透明的；盘只有 boardPx² 那么大，
+    // 224² = 50176 就算一个像素不缺也只占画布的 28.5%，实测 painted=53188。
+    // 换成按渲染器的画法**算出来**的那一方盘面：drawBoardBase 填的是
+    // roundRect(left-3, top-3, boardPx+6, boardPx+6, Cell.max/4)（js/render/board.js:117），
+    // 圆角半径 r = Cell.max/4 = 14，四个角各缺 r²(1−π/4)。这是**下界**：抗锯齿只会让
+    // alpha>0 的像素比理想面积多一圈半个像素宽的毛边（实测 53188 对理想 52732，多 456 ≈ 周长的一半），
+    // 所以这里给 >= 而不打折。
+    const dpr = g0.dpr;
+    const panelSide = (g0.boardPx + 6) * dpr;
+    const panelR = Math.min(theme.Cell.max / 4, (g0.boardPx + 6) / 2) * dpr;
+    const panelArea = panelSide * panelSide - 4 * panelR * panelR * (1 - Math.PI / 4);
+    ck(`盘面那一方像素真的落笔了（${painted}/${Math.round(panelArea)}）`, painted >= panelArea, JSON.stringify({ painted, panelArea: Math.round(panelArea), canvasArea: areaOf(g0.cssW, g0.cssH) }));
     const corner = A().pixel(2, 2);
     eq('画布角落仍是没画过的透明（不是整幅刷了底色）', corner[3], 0);
     eq('角落没画就没有颜色可言', corner.slice(0, 3).join(','), '0,0,0');
@@ -924,11 +997,40 @@
     const labBack = over(backR.c, labBase, backR.a);
     const dimR = rgba(pal.inkDim);
     const labInk = over(dimR.c, labBack, dimR.a);
-    const labW = Math.min(rh.s - 2, 40);
+    // 底衬的宽不是拍脑袋来的：drawCageLabels 填的是
+    //   fillRect(rc.x+1, rc.y+1, w+4, round(cell×labelScale)+5)，w = ctx.measureText(label).width，
+    // 字体 `600 ${max(10, round(cell×labelScale))}px ${Font.mono}`（js/render/board.js:195/202/204）。
+    // 原来这里写成死数 `Math.min(rh.s - 2, 40)`——那个 40 没有任何出处，于是量到的矩形比画出来的
+    // 宽出一整条（40×24=960 vs 真值 (w+4)×24），多出来的部分本来就是笼子底色，永远不计命中，
+    // 分母掺了水之后那条「≥25%」就变成了碰运气（实测 193/960，报出来的采样色 74,79,92 其实是字边）。
+    const mc = document.createElement('canvas').getContext('2d');
+    mc.font = `600 ${Math.max(10, Math.round(rh.s * theme.Cell.labelScale))}px ${theme.Font.mono}`;
+    const labGlyphW = mc.measureText(head.label).width;
+    const labW = labGlyphW + 4;
     const labArea = areaOf(labW, labH);
     const backPx = countIn(rh.x + 1, rh.y + 1, labW, labH, labBack, 6);
-    ck(`笼标签的底衬画在笼头左上角（${backPx}/${labArea} 命中期望色）`, backPx >= labArea * 0.25 && backPx >= 40, JSON.stringify({ backPx, labArea, want: labBack.join(','), got: pixel(rh.x + 4, rh.y + 4).join(',') }));
+    // 「至少一半是底衬」而不是「全是」：那枚字就画在底衬上头（fillText 排在 fillRect 之后，
+    // js/render/board.js:206），笼粗边又从格子边界往内吃进半个线宽，两者都落在矩形里，
+    // 100% 覆盖率在物理上不存在。实测这一格（笼 0 的头＝格 14，label "3"）193/371。
+    ck(`笼标签的底衬铺在 measureText+4 那一片上（${backPx}/${labArea} 命中期望色）`, backPx >= labArea * 0.5 && backPx >= 40, JSON.stringify({ backPx, labArea, labW: Math.round(labW * 10) / 10, want: labBack.join(','), got: pixel(rh.x + 4, rh.y + labH - 3).join(',') }));
+    // 宽度到底对不对，不靠覆盖率说话——在一条**字压不到**的横线上直接量底衬的首末像素。
+    // 取 dy = labH-2 那一行：数字的笔尖在 rc.y+3、em 高 round(cell×0.34)=19px，十进制数字没有
+    // 降部，墨迹到 rc.y+19 就断了；实测 rc.y+22 一整行都是干净的底衬。
+    const scanRow = rh.y + labH - 2;
+    const hits = [];
+    for (let dx = 1; dx < rh.s - 1; dx++) if (dist(pixel(rh.x + dx, scanRow), labBack) <= 6) hits.push(dx);
+    const firstHit = hits.length ? Math.min(...hits) : -1;
+    const lastHit = hits.length ? Math.max(...hits) : -1;
+    ck(`底衬那一行量得到成片的像素（dx ${firstHit}..${lastHit}，共 ${hits.length} 列）`, hits.length >= Math.round(labW) - g0.heavy, JSON.stringify({ hits, labW: Math.round(labW) }));
+    // 右端停在 measureText+4 那一列（±1px 给抗锯齿）。换回原来那个来路不明的 40，
+    // 这里会量到右端停在 15 而期望是 39——那才是「底衬没画到那么宽」。
+    ck(`底衬右端停在 measureText+4（lastHit ${lastHit} vs round(labW) ${Math.round(labW)}）`, Math.abs(lastHit - Math.round(labW)) <= 1, JSON.stringify({ lastHit, labW: Math.round(labW * 10) / 10 }));
+    // 左端不许从格子外面开始涂，但也不能比笼粗边伸进格里的那半个线宽更靠里——
+    // fillRect 的起点是 rc.x+1，粗边居中压在格界上、内线到 rc.x+heavy/2 为止。
+    ck(`底衬左端就在笼头左上角（firstHit ${firstHit}，格子里侧被粗边盖住的前 ${Math.ceil(g0.heavy / 2)} px 量不到）`, firstHit >= 1 && firstHit <= Math.ceil(g0.heavy / 2), JSON.stringify({ firstHit, heavy: g0.heavy }));
     eq('底衬按 round(cell×0.34)+5 的高度收口，往下就是干净底色', countIn(rh.x + 1, rh.y + 1 + labH + 6, rh.s - 2, 8, labBack, 6), 0);
+    // 也不许往宽处涂出去：越过 measureText+4 那一列再往右 6px，必须一格底衬都没有。
+    eq('底衬止于 measureText+4，右边的留白里一点都不许有', countIn(rh.x + 1 + Math.ceil(labW) + 1, rh.y + 1, 6, labH, labBack, 6), 0);
     const glyph = core(rh.x + 2, rh.y + 2, labW - 1, labH - 2, labBack);
     ck(`标签的字是 inkDim 叠在底衬上的那个色（芯 ${glyph.px.join(',')}，离期望 ${dist(glyph.px, labInk)}）`, glyph.d > 40 && dist(glyph.px, labInk) <= dist(glyph.px, labBack) && dist(glyph.px, labInk) <= dist(glyph.px, labBase), JSON.stringify({ glyph: glyph.px, d: glyph.d, want: labInk.join(','), back: labBack.join(','), base: labBase.join(',') }));
 
@@ -963,11 +1065,27 @@
     ck('笼界占的像素比笼内接缝多得多（粗细分明）', edgeMark > seamMark * 2, JSON.stringify({ edgeMark, seamMark }));
 
     // ---- (e) 铅笔的两种色：引擎证明还活得下来的候选亮一档，已经出局的淡一档 -------------------------
-    const noteT = board.cages.find((c) => c.cells.length > 1).cells[1];
-    const aliveV = 1;
-    const deadV = 2;
+    // 活/死两档的**颜色差**才是这一段的主题，所以取样格必须挑一格里同时住着「引擎证得活」
+    // 和「引擎已判死」两个候选。原来钉在 noteT（笼 4+ 的第二格，格 8）上写死 1 与 2，
+    // 判成「1 活 2 死」——可这格在空盘上就被题面推死了：列 0 有定值笼格 0=2、格 12=4，
+    // 行 1 有格 5=3、格 6=2 ⇒ 格 4 只能 1 ⇒ 笼 4+ 逼出格 8=3。于是 1 和 2 **都是死候选**，
+    // 渲染器按同一支笔（Palette.pencil）画了两遍（js/render/board.js:277 的 dead 分流），
+    // 「差一档亮度」在物理上不可能成立：实测两笔芯 [82,85,96] 与 [83,85,96]，差 1。
+    // 换笼 6+ 的第二格（格 10）：同笼同行不许同值 ⇒ {2,4}；列 2 已有格 6=2 ⇒ 只剩 4。
+    // 这格活的恰好一个（4），死的还有 1 和 2，两个候选都落在九宫位第一列/第二列上。
+    const penT = board.cages.find((c) => c.op === '+' && c.target === 6).cells[1];
     await click('#btn-note');
-    A().select(noteT);
+    A().select(penT);
+    // 活/死不写死、从数字键盘现读（`candidate-off` 就是界面自己划掉的那批，与渲染器同源）。
+    // 但位次要挑：drawNotes 的字心是 `rc.x + (idx%3)·per + per`（js/render/board.js:275 那个
+    // `+ per/2 + per/2`），idx=2 那一列的字心正落在**格子右边界**上，半个字溢到邻格，
+    // 拿它当「这一笔的芯」取样不成立——所以只从前两列里挑。这条渲染缺陷另报，不在本轮改。
+    const offHere = $$('#digit-pad button.digit').filter((b) => b.classList.contains('candidate-off')).map((b) => Number(b.dataset.digit));
+    const inBoard = Array.from({ length: size }, (_, i) => i + 1);
+    const safeSlot = (v) => (v - 1) % 3 !== 2;
+    const aliveV = inBoard.find((v) => safeSlot(v) && !offHere.includes(v));
+    const deadV = inBoard.find((v) => safeSlot(v) && offHere.includes(v));
+    ck(`取样前提：格 ${penT} 上既有活候选也有死候选，且两个的九宫位都在取得到芯的地方`, !!aliveV && !!deadV, JSON.stringify({ penT, off: offHere, aliveV, deadV }));
     await key(String(aliveV));
     await key(String(deadV));
     A().select(0);
@@ -980,9 +1098,9 @@
       const s = Math.max(10, Math.round(per * 0.9));
       return { x: rc.x + (idx % 3) * per + per - s / 2, y: rc.y + Math.floor(idx / 3) * per + per - s / 2, s };
     };
-    const sl1 = slot(noteT, aliveV);
-    const sl2 = slot(noteT, deadV);
-    const nb = baseOf(noteT);
+    const sl1 = slot(penT, aliveV);
+    const sl2 = slot(penT, deadV);
+    const nb = baseOf(penT);
     const alive = core(sl1.x, sl1.y, sl1.s, sl1.s, nb);
     const dead = core(sl2.x, sl2.y, sl2.s, sl2.s, nb);
     const strong = rgb(pal.pencilStrong);
@@ -995,7 +1113,7 @@
     // ---- (f) 墨色三条路：算对的笼 = success、选中没算完 = accentEdge、普通落子 = ink -------------
     const single = board.cages.find((c) => c.op === '=' && c.cells.length === 1 && c.head !== 0);
     const goodT = single.cells[0];
-    const mateT = board.cages.find((c) => c.cells.includes(noteT) && c.cells.length > 1).cells.find((t) => t !== noteT);
+    const mateT = board.cages.find((c) => c.cells.includes(penT) && c.cells.length > 1).cells.find((t) => t !== penT);
     const plainCage = board.cages.find((c) => c.cells.length === 3);
     const plainT = plainCage.cells[0];
     A().select(goodT);

@@ -45,7 +45,7 @@ export class Game extends EventTarget {
     this.notes = new Uint16Array(0); // 玩家自己的候选集，bit v = 「这格还可能是 v」
     this.noteMode = false; // 数字键当前是「写字」还是「记铅笔」
     this.sel = -1;
-    this.history = []; // 撤销栈：{kind, cell, ink, notes}
+    this.history = []; // 撤销栈：{cell, ink, notes, costs}——costs 是「这一步当初计没计步」
     this.moves = 0;
     this.hints = 0;
     this.hintLog = [];
@@ -269,8 +269,8 @@ export class Game extends EventTarget {
     return this.noteMode;
   }
 
-  pushHistory(cell) {
-    this.history.push({ cell, ink: this.ink[cell], notes: this.notes[cell] });
+  pushHistory(cell, costs = true) {
+    this.history.push({ cell, ink: this.ink[cell], notes: this.notes[cell], costs });
     if (this.history.length > 400) this.history.shift();
   }
 
@@ -339,7 +339,7 @@ export class Game extends EventTarget {
     const before = this.notes[cell];
     const after = before & keep;
     if (before === after) return { ok: false, silent: true };
-    this.pushHistory(cell);
+    this.pushHistory(cell, false); // 进栈是为了「撤得回来」，但它不该计费（见 undo）
     this.notes[cell] = after;
     this.emit('prune', { cell, removed: popcount(before & ~after) });
     return { ok: true, removed: popcount(before & ~after) };
@@ -351,7 +351,10 @@ export class Game extends EventTarget {
     this.ink[last.cell] = last.ink;
     this.notes[last.cell] = last.notes;
     this.sel = last.cell;
-    this.moves = Math.max(0, this.moves - 1);
+    // 只有当初计了步的那一笔才退得起步。`costs` 缺省按 true 读：撤销栈是内存里的帧，
+    // 不会有旧格式混进来，但「不收费」必须由写侧明确声明——反过来（默认 false）等于
+    // 让落子/记铅笔/擦掉都白送一步，那比现在这条错得更难看。
+    if (last.costs !== false) this.moves = Math.max(0, this.moves - 1);
     this.won = false;
     this.derived = null;
     this.emit('undo', { cell: last.cell });
