@@ -1085,7 +1085,9 @@ const okInk = g.inkValue(first.cell, first.value);
 eq('按对数字：写入成功', okInk.ok, true);
 eq('按对数字：计一步', g.moves, 1);
 eq('按对数字：格子里有值了', g.ink[first.cell], first.value);
-g.pushHistory(first.cell);
+// 这里**不再**手动 pushHistory：inkValue 落子那一刻自己就把「改之前」的那一格记进栈了
+// （js/ui/game.js 的 pushHistory 在写值之前调用）。补一次记的就是「改之后」的样子，
+// 撤销会退回到同一个值——撤销栈是实现的内部记账，调用方（界面的撤销按钮也一样）都不许自己 push。
 const beforeUndo = Array.from(g.ink).join(',');
 g.undo();
 eq('撤销把墨水退回去了', Array.from(g.ink).join(',') !== beforeUndo || g.ink[first.cell] === 0, true);
@@ -1095,8 +1097,12 @@ eq('方向键往右走一格（选中第 4 格）', (g.move('right'), g.sel), 4)
 eq('方向键往左回到第 3 格', (g.move('left'), g.sel), 3);
 g.move('up');
 eq('顶行往上不越界', g.sel, 3);
+// 顶行往上被挡住之后，往下必须照样走一格（7 阶：3 + 7 = 10）——
+// 界面把 ArrowDown 无条件接给 move('down')，「刚被挡过一次就不许往下」会把整个盘面锁死。
 g.move('down');
-eq('再下来回到原格', g.sel, 3);
+eq('往上被挡住之后往下照样走一格', g.sel, 10);
+g.move('up');
+eq('再上来回到原格', g.sel, 3);
 
 head('C 状态机 · 提示不是答案');
 g.setPuzzle({ size: 7, text: GOLD7, tier: 'master', ref: 'test-gold' });
@@ -1170,9 +1176,15 @@ eq('重开也不动种下的题面', gr.ref, 'test-restart');
 head('D 存档形状');
 const mod = await import(`../js/store.js?tag=${Date.now()}`);
 const { Store, sanitize, encodeRuns, decodeRuns } = mod;
-eq('编码：全 0 的 49 格压成一段', encodeRuns(new Uint8Array(49)), '0x31');
-eq('解码回来还是 49 个 0', Array.from(decodeRuns('0x31', 49)).length, 49);
-ck('解码：值全为 0', Array.from(decodeRuns('0x31', 49)).every((v) => v === 0));
+// 游程的**个数**跟值用同一个基数（36）：49 个 0 是 `0x1d`（1×36+13），不是 `0x31`——
+// 后者是 49 的十六进制写法，而 decodeRuns 拿 parseInt(…, 36) 去读它会读出 109 格。
+// encodeRuns 里 `n < 1296` 那个上限就是 36²：个数必须装得下两个 36 进制位。
+eq('编码：全 0 的 49 格压成一段（个数按 36 进制：49 = 1d）', encodeRuns(new Uint8Array(49)), '0x1d');
+eq('解码回来还是 49 个 0', Array.from(decodeRuns('0x1d', 49)).length, 49);
+ck('解码：值全为 0', Array.from(decodeRuns('0x1d', 49)).every((v) => v === 0));
+const longRun = Uint16Array.from([0, ...Array(40).fill(7), 9]); // 42 格：中段一长串 7
+eq('编码：中段 40 个 7 写成 7x14（40 的 36 进制是 14，十六进制才是 28）', encodeRuns(longRun), '0.7x14.9');
+eq('往返：长游程之后不许把后面的段挪位', Array.from(decodeRuns(encodeRuns(longRun), longRun.length)), Array.from(longRun));
 eq('编码：混排', encodeRuns(Uint8Array.of(1, 1, 1, 0, 2, 2)), '1x3.0.2x2');
 eq('往返：混排', Array.from(decodeRuns(encodeRuns(Uint8Array.of(1, 1, 1, 0, 2, 2)), 6)), [1, 1, 1, 0, 2, 2]);
 const masks = Uint16Array.from([0, 2, 6, 1022, 0, 0]);
@@ -1213,12 +1225,18 @@ Store.markSolved(7);
 eq('打过第 7 关', [...Store.solvedIds()], [7]);
 Store.markSolved(7);
 eq('重复记同一关不产生第二条', [...Store.solvedIds()], [7]);
-Store.saveResume({ ref: 'campaign-3', originSeed: 'abc', tier: 'learner', size: 4 }, Uint8Array.of(1, 2, 0, 0), Uint16Array.of(0, 0, 2, 0), { moves: 2, hints: 0, elapsedMs: 10 });
+// 4 格墨水配的是 2×2 的盘：size 是这张盘的骨架，一盘墨水**总是** size*size 格
+// （main.js 交给 Game 的就是 game.ink 整串，界面那边只接受长度恰好等于格子数的 keep.ink）。
+// 原来这份夹具写的是 size:4 配 4 格墨水——那是 16 个格里只捞回 4 格的断档，
+// 它要的「墨水回来了」正好是被 sanitize 该丢掉的那一种形状，见下面那条断言。
+Store.saveResume({ ref: 'campaign-3', originSeed: 'abc', tier: 'learner', size: 2 }, Uint8Array.of(1, 2, 0, 0), Uint16Array.of(0, 0, 2, 0), { moves: 2, hints: 0, elapsedMs: 10 });
 const r = Store.resume();
 eq('续局存的是原始种子', r.seed, 'abc');
 eq('续局的墨水回来了', Array.from(r.inkCells), [1, 2, 0, 0]);
 eq('续局的铅笔回来了', Array.from(r.noteCells), [0, 0, 2, 0]);
-eq('续局的边长', r.size, 4);
+eq('续局的边长', r.size, 2);
+eq('续局的墨水长度就是这盘的格子数（界面才肯整串收下）', r.inkCells.length, r.size * r.size);
+eq('墨水盖不满这盘＝断档：丢掉整份 resume，不补 0 变出一张新盘', sanitize({ resume: { size: 4, ink: '1.2.0x2', notes: '0x4', ref: 'x' } }).resume, null);
 Store.clearResume();
 eq('清掉续局', Store.resume(), null);
 const blob = Store.save() === false ? '' : (() => { Store.setSetting('sound', false); return JSON.stringify(Store.data); })();
@@ -1237,7 +1255,12 @@ globalThis.localStorage = {
 const mod2 = await import(`../js/store.js?boom=${Date.now()}`);
 ck('存储抛异常时模块照样能用', mod2.Store.data.settings.sound === true);
 eq('存储抛异常时 save 不炸', mod2.Store.setSetting('sound', false), undefined);
-ck('脏 JSON 也能活', sanitize(JSON.parse('{"resume":{"size":4,"ink":42}}')).resume, null);
+// 原来这条写的是 `ck('脏 JSON 也能活', sanitize(...).resume, null)`：`ck` 判的是 `!!cond`，
+// 而 cond 就是那个该为 null 的 resume——null 永远假，这条从写下的那天起就不可能绿。
+// 第三个参数在 ck 那里是「附加说明」，作者想要的显然是 eq(…, null)：resume 丢掉、其余照旧。
+const dirtyJson = sanitize(JSON.parse('{"resume":{"size":4,"ink":42},"totals":{"solved":3}}'));
+eq('脏 JSON 也能活：ink 不是字符串就丢掉那份 resume', dirtyJson.resume, null);
+ck('脏 JSON 也能活：其余字段照旧，模块没炸', dirtyJson.totals.solved === 3 && dirtyJson.settings.sound === true);
 delete globalThis.localStorage;
 
 // ================================ 汇总 ================================
