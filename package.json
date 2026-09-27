@@ -1,0 +1,36 @@
+{
+  "name": "kenken",
+  "version": "1.0.0",
+  "description": "聪明格 · KenKen（Calcudoku / Mathdoku）— 零猜测算术笼推理. 出题时由铅笔求解器实测：每一局都唯一可解、且只用四条局部规则就能推到底, 难度分与档位区间都是量出来的.",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "node server.cjs",
+    "dev": "node server.cjs 5315",
+    "electron": "electron .",
+    "bake": "node tools/bake.mjs",
+    "test": "node tools/engine-test.mjs",
+    "balance": "node tools/balance.mjs",
+    "verify": "bash tools/verify.sh",
+    "check": "for f in js/*.js js/*/*.js; do node --check \"$f\" || exit 1; done && node --check server.cjs && node --check electron/main.cjs && for f in tools/*.mjs tools/scenarios.js; do node --check \"$f\" || exit 1; done && echo OK"
+  },
+  "keywords": [
+    "game",
+    "puzzle",
+    "kenken",
+    "calcudoku",
+    "mathdoku",
+    "latin-square",
+    "logic",
+    "deduction",
+    "no-guess",
+    "procedural",
+    "web",
+    "electron"
+  ],
+  "author": "z-biz-game",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

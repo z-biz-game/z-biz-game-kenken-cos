@@ -1,0 +1,43 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 没有打包器：游戏就是一堆 ES 模块，站点就是一次文件拷贝。
+      # 只带 index.html / css / js —— 把服务器、Electron、harness、文档留在 artifact 外面，
+      # 也就顺手把 node_modules 留在了外面（用 path: . 会一起传上去）。
+      - name: Assemble static site
+        run: |
+          mkdir _site
+          cp index.html _site/
+          cp -r css js _site/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

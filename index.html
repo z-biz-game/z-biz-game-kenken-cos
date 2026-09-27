@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#080B16" />
+<title>聪明格 · KenKen 算术笼推理</title>
+<meta name="description" content="KenKen 聪明格（Calcudoku / Mathdoku）：每行每列都是 1..N 的排列，每个笼的「目标数 + 运算符」写着那几格要怎么算才对。每局唯一解、每局都能用四条局部规则推到底，提示只说推得出的那一步。" />
+<!-- 内联图标：不写它的话浏览器会去 Pages 域名根上找 /favicon.ico，然后记一条 404。 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23080B16'/%3E%3Crect x='4' y='4' width='24' height='24' rx='3' fill='none' stroke='%233A4A72' stroke-width='2'/%3E%3Cpath d='M4 16 H28 M16 4 V28' stroke='%23243050' stroke-width='1.6'/%3E%3Ctext x='6.5' y='13' font-family='monospace' font-size='9' fill='%23FFC85C'%3E12%C3%97%3C/text%3E%3Ctext x='18' y='26' font-family='monospace' font-size='9' fill='%237BB8FF'%3E3%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="css/game.css" />
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <h1>聪明格</h1>
+      <p class="sub">KenKen · Calcudoku</p>
+    </div>
+    <div class="top-actions">
+      <button id="btn-daily" class="ghost" type="button">日课</button>
+      <button id="btn-sound" class="ghost" type="button" aria-pressed="true">音效 开</button>
+      <button id="btn-motion" class="ghost" type="button" aria-pressed="false">动效 全</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-menu" class="view">
+      <div class="menu-hero">
+        <h2>每行每列都是 1..N 各一次，每个笼写着那几格要怎么算</h2>
+        <p>
+          粗线把盘分成一个个「笼」。笼子左上角的目标数与运算符（＋ − × ÷，单格笼只写一个数）
+          说的是：这几格里的数字按这个运算符怎么算都行，结果得是那个目标数。
+          减法和除法只在两格笼里出现，顺序不限。
+          这里没有运气题：每一局都只有一个答案，也每一局都能靠逻辑推到底。
+        </p>
+      </div>
+
+      <div class="menu-cols">
+        <div class="col">
+          <h3 class="col-title">选一档（难度是量出来的，不是贴标签）</h3>
+          <div id="tier-list" class="tiers"></div>
+
+          <h3 class="col-title">战役</h3>
+          <div id="chapter-list" class="chapters"></div>
+
+          <div id="resume-card" class="resume" hidden>
+            <div class="resume-txt">
+              <strong id="resume-name">未完成的牌局</strong>
+              <span id="resume-meta"></span>
+            </div>
+            <button id="btn-resume" class="primary" type="button">继续</button>
+          </div>
+        </div>
+
+        <div class="col">
+          <h3 class="col-title">纪录（同档比：先看不求提示几次，再看步数，最后看时间）</h3>
+          <ul id="record-list" class="records"></ul>
+
+          <h3 class="col-title">今日与总计</h3>
+          <div id="daily-card" class="daily"></div>
+
+          <h3 class="col-title">你会用到的四条规则</h3>
+          <ol class="rules">
+            <li><b>行列排除</b>：同行同列已有的数字互相挤候选；一个数字在一行里只剩一格放得下，就得填在那里。</li>
+            <li><b>极值与边界</b>：一个笼的和/积有可达区间。目标数出界就矛盾；某个一填就出界的候选，不能在这格。</li>
+            <li><b>笼组合枚举</b>：把这个笼在 1..N 内所有算得通的组合列出来取交集——一个组合里都没有的数字全部排除，所有组合都落在同一格的数字直接填上。</li>
+            <li><b>笼与行列装箱</b>：一行里各个笼贡献的数字之和必须是 N(N+1)/2。配不满就矛盾，只剩一种配法就把那一格钉死。</li>
+          </ol>
+          <p class="rules-note">四条都只看局部事实：它们写下的每一格、每一处排除，在盘面的<b>每一个解</b>里都成立。所以推得完的盘必然只有一个答案——出题时这一条是被独立穷举计数器逐格核对过的。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-game" class="view" hidden>
+      <div class="stage">
+        <div class="stage-head">
+          <span id="stat-name" class="puzzle-name">—</span>
+          <span id="stat-tier" class="chip">—</span>
+          <span id="stat-time" class="chip mono">00:00</span>
+        </div>
+        <div id="board-wrap">
+          <canvas id="board" data-mode="ink" role="img" aria-label="聪明格棋盘：点格子，再按数字键落子或记铅笔"></canvas>
+          <div id="win-veil" hidden>
+            <div class="win-card">
+              <h3>每个笼都算对了</h3>
+              <p id="win-meta"></p>
+              <p id="win-record" class="win-record"></p>
+              <div class="win-actions">
+                <button id="btn-again" class="primary" type="button">下一关</button>
+                <button id="btn-menu-2" class="ghost" type="button">回选档</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p id="state-line" class="conflict-line" aria-live="polite"></p>
+      </div>
+
+      <aside class="panel">
+        <div id="digit-pad" class="pad" role="group" aria-label="数字键盘"></div>
+        <div class="pad-tools">
+          <button id="btn-note" class="mode" type="button" aria-pressed="false" aria-label="铅笔模式：数字键改成记候选">铅笔 关</button>
+          <button id="btn-erase" class="ghost" type="button" aria-label="擦掉这一格">擦</button>
+          <button id="btn-prune" class="ghost" type="button" aria-label="擦掉这一格里已经不可能出现的候选">清理铅笔</button>
+        </div>
+        <div class="acts">
+          <button id="btn-hint" class="primary" type="button">提示<span class="mono" id="hint-count">0</span></button>
+          <button id="btn-undo" class="ghost" type="button">撤销</button>
+          <button id="btn-restart" class="ghost" type="button">重开</button>
+          <button id="btn-new" class="ghost" type="button">换一局</button>
+          <button id="btn-menu" class="ghost" type="button">回选档</button>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><span>步数</span><b id="stat-moves" class="mono">0</b></div>
+          <div class="stat"><span>提示</span><b id="stat-hints" class="mono">0</b></div>
+          <div class="stat"><span>已落子</span><b id="stat-filled" class="mono">0/0</b></div>
+          <div class="stat"><span>算对的笼</span><b id="stat-cages" class="mono">0/0</b></div>
+          <div class="stat"><span>冲突格</span><b id="stat-conflicts" class="mono">0</b></div>
+          <div class="stat"><span>难度实测</span><b id="stat-score" class="mono">—</b></div>
+        </div>
+
+        <div class="hint-box">
+          <h4 id="hint-rule">提示理由</h4>
+          <p id="hint-line">按 <b>提示</b> 会说出当前能推的一格，以及它依据哪条规则、看的哪个笼。</p>
+        </div>
+
+        <div class="legend">
+          <span><i class="sw sw-ink"></i>你落的子</span>
+          <span><i class="sw sw-note"></i>你的铅笔</span>
+          <span><i class="sw sw-pencil"></i>已被排除的铅笔</span>
+          <span><i class="sw sw-good"></i>算对的笼</span>
+          <span><i class="sw sw-bad"></i>和线索矛盾</span>
+          <span><i class="sw sw-label"></i>笼的目标数</span>
+        </div>
+        <p class="keyhint"><b>点格子</b> 选中 · <b>1..N</b> 落子 · <b>P</b> 铅笔开关 · <b>0/⌫</b> 擦 · <b>H</b> 提示 · <b>Z</b> 撤销 · <b>方向键</b> 移动</p>
+      </aside>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>纯 ES 模块 · 零运行时依赖 · 无构建步骤 · 无美术文件：笼的粗边与线索都画在 canvas 上</span>
+    <span id="build-stamp" class="mono"></span>
+  </footer>
+</div>
+<script>
+window.kenkenReady = false;
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
