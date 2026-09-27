@@ -80,9 +80,12 @@ check`、`bake --check` 是当场重跑的；难度分位表与浏览器门禁�
   （`js/main.js:563-572`、`:680-685`）。
 - **只在 headless Chrome 里绿过**。Safari、Firefox、真机 iOS/Android、低配设备未经验证。
   `bash tools/verify.sh` 跑的是本机 root 形态与本机带 `/z-biz-game-kenken-cos/` 前缀的两种 URL
-  （两种形态各 324 条，2026-09-28 实测，整轮 17.5 秒）。第三种形态——已部署的
-  `https://z-biz-game.github.io/z-biz-game-kenken-cos/`——走 `BASE_URL=` 那条路（`tools/verify.sh:164-166`），
-  push 之后复跑，跑过之后数字才会出现在这里。
+  （两种形态各 324 条，2026-09-28 实测，整轮 17.5 秒）。第三种形态也跑过了——已部署的
+  `https://z-biz-game.github.io/z-biz-game-kenken-cos/`，走 `BASE_URL=` 那条路（`tools/verify.sh:164-166`，
+  它不起任何本地服务，只连一个 headless Chrome）：同一套 5 个场景、**324 条、0 失败、10.0 秒**
+  （2026-09-28 05:4x），而且报出来的读数与本机一致（`worstNodes 264711`、`inkCode 2.0x3.1.0xb`、
+  `painted 53188`）。部署件与磁盘的字节也对过：`index.html`、`js/main.js`、`js/engine/kenken.js`、
+  `js/render/board.js`、`css/game.css` 五份的 sha256 前 12 位一一相同。仍未验证的是浏览器种类与设备。
 - Electron 壳（`electron/main.cjs`）只有 `npm run check` 的 `node --check` 级检查，没有任何运行时断言。
 
 ## 难度是量出来的

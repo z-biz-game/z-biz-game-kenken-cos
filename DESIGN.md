@@ -180,8 +180,12 @@ node tools/engine-test.mjs                   → 655/655（A 规则 13 节 / B �
 SAMPLES=24 node tools/balance.mjs            → 五档中位数 31.5 < 38.7 < 43.6 < 46.5 < 60.6，退出码 0
 node tools/bake.mjs --check                  → 与重烤结果逐字节一致
 bash tools/verify.sh                         → root 324 条 + prefix 324 条，各 0 失败，整轮 17.5 秒
-BASE_URL=<已部署站点> bash tools/verify.sh    → 只跑那一种形态（tools/verify.sh:164-166）
+BASE_URL=<已部署站点> bash tools/verify.sh    → 只跑那一种形态（tools/verify.sh:164-166）：324 条 0 失败、10.0 秒
 ```
+
+远端首跑（2026-09-28 05:3x，`.github/workflows/ci.yml` 的 `check` + `browser` 两个 job 与
+`Deploy to GitHub Pages`）三条都绿；Pages 是在 push **之前**用 `build_type: workflow` 开好的，
+所以那一次抢跑没有发生（新开仓先推后开，`configure-pages` 就会 404）。
 
 `tools/verify.sh` 的默认场景清单是 `first engine fingerprint play ui`（`:137`），端口 5315 / CDP 9365
 （`:27`、`:24`），两种 URL 形态在同一端口上轮流起服务器：root 用仓自己的 `server.cjs`，prefix 用
