@@ -98,10 +98,14 @@ export function countSolutions(puzzle, opts = {}) {
   const cageComplete = (ci, at) => lastCellOf[ci] === at;
 
   const go = (t) => {
-    if (nodes++ > budget) {
+    // 预算是**硬上限**：一次也不许多走。写成 `nodes++ > budget` 会先自增再判，
+    // 节点数一路冲到 budget+2 才回头——「数到预算就老实说没数完」这句话自己就没守住，
+    // 而超没超预算是别人（balance/bake/测试）来问它的，不是它自己说了算。
+    if (nodes >= budget) {
       over = true;
       return true;
     }
+    nodes++;
     if (t === n) {
       solutions++;
       if (!first) first = Uint8Array.from(assign);
