@@ -1116,6 +1116,10 @@ ck('提示句以格子开头', /^[第\d]/.test(h1.text));
 const h2 = g.hint();
 ck('连着要提示不会重复同一条', h2.text !== h1.text);
 eq('第二次也记了数', g.hints, 2);
+// 只躲"上一条"的话，第三次会绕回第一条——同一句话隔一轮又念一遍，玩家看到的是提示坏了。
+const hNext = g.hint();
+ck('第三次也不许回头念前两条里的任何一条', hNext.text !== h1.text && hNext.text !== h2.text, `第一条「${h1.text}」第三条「${hNext.text}」`);
+eq('第三次也记了数', g.hints, 3);
 const dirty = new Game();
 dirty.setPuzzle({ size: 3, text: b3.text, tier: 'newcomer', ref: 'test-3' });
 dirty.ink[0] = 1;
