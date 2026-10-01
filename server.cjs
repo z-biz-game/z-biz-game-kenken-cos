@@ -12,6 +12,9 @@ const TYPES = {
   '.cjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  // 缺这一条的话 manifest 会被当 application/octet-stream 端出去，Chrome 直接不解析：
+  // 本地看着「装了」，其实一次都没装成。
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',

@@ -1,0 +1,51 @@
+{
+ "master": 1024,
+ "og": [
+  1200,
+  630
+ ],
+ "palette": {
+  "accent": "#FFC85C",
+  "accentEdge": "#FFE3A6",
+  "accentSoft": "rgba(255,200,92,0.14)",
+  "bgBottom": "#131A2E",
+  "bgTop": "#080B16",
+  "cageSolved": "rgba(61,220,145,0.10)",
+  "cageTint": "rgba(123,184,255,0.05)",
+  "cageTintAlt": "rgba(255,200,92,0.05)",
+  "error": "#FF5C7A",
+  "focus": "rgba(123,184,255,0.16)",
+  "hint": "#7BB8FF",
+  "info": "#7BB8FF",
+  "ink": "#F2F5FB",
+  "inkDim": "rgba(242,245,251,0.62)",
+  "inkFaint": "rgba(242,245,251,0.34)",
+  "line": "#243050",
+  "lineHeavy": "#3A4A72",
+  "pencil": "rgba(242,245,251,0.30)",
+  "pencilStrong": "#8FA6CC",
+  "success": "#3DDC91",
+  "surface": "#101627",
+  "surfaceLift": "#182036",
+  "warn": "#FFB05C"
+ },
+ "files": [
+  "icons/icon-1024.png",
+  "icons/icon-512.png",
+  "icons/icon-192.png",
+  "icons/icon-180.png",
+  "icons/icon-96.png",
+  "icons/icon-64.png",
+  "icons/icon-48.png",
+  "icons/icon-32.png",
+  "icons/icon-16.png",
+  "icons/icon-maskable-512.png",
+  "icons/icon-maskable-192.png",
+  "icons/apple-touch-icon.png",
+  "icons/favicon-32.png",
+  "icons/favicon-16.png",
+  "icons/og.png",
+  "assets/img/grain.png",
+  "assets/img/cage-motif.png"
+ ]
+}
