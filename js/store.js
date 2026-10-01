@@ -85,34 +85,23 @@ function runsCover(text) {
 }
 
 // ---- 存储访问：拿不到就当没有 -------------------------------------------------------
-
-function backend() {
-  try {
-    if (typeof localStorage !== 'undefined' && localStorage) return localStorage;
-  } catch {
-    return null; // Safari 无痕模式下连属性访问都会抛
-  }
-  return null;
-}
+// 不绕句柄：localStorage 在有些环境里连**取属性**都会抛（Safari 无痕），在另一些环境里
+// 根本不存在（node）。两种都塌成同一个异常：读不到就当没有存档，写不进就不记事。
 
 function readRaw() {
-  const ls = backend();
-  if (!ls) return null;
   try {
-    return ls.getItem(KEY);
+    return localStorage.getItem(KEY);
   } catch {
     return null;
   }
 }
 
 function writeRaw(text) {
-  const ls = backend();
-  if (!ls) return false;
   try {
-    ls.setItem(KEY, text);
+    localStorage.setItem(KEY, text);
     return true;
   } catch {
-    return false; // 配额 / 无痕：游戏照玩，只是不记事
+    return false;
   }
 }
 

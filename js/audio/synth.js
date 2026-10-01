@@ -7,9 +7,13 @@
 
 let ctx = null;
 let master = null;
-let enabled = true;
+// 静音是**两件**事：不再产生新的声音，以及已经在跑的 AudioContext 真的停下来。
+// 只把 master 的 gain 设成 0 是假静音——上下文照样在跑、照样耗电，而且任何一次
+// `audio()` 都会顺手把 suspended 解回来（这条在本仓是真会发生的，见下面的 muted 短路）。
+let muted = false;
 
 function audio() {
+  if (muted) return null; // 静音态连上下文都不碰：一次 resume() 就把「已挂起」洗成「在跑」
   if (typeof AudioContext === 'undefined' && typeof webkitAudioContext === 'undefined') return null;
   if (!ctx) {
     const Ctor = typeof AudioContext !== 'undefined' ? AudioContext : webkitAudioContext;
@@ -26,10 +30,25 @@ function audio() {
   return ctx;
 }
 
+/** 挂起/恢复唯一的入口：静音态下不新建任何节点，也不留一个在空转的上下文。 */
+function setMuted(v) {
+  muted = !!v;
+  if (!ctx) return; // 还没出生过上下文就没什么可停的
+  try {
+    if (muted) ctx.suspend();
+    else ctx.resume();
+  } catch {
+    // 老 WebKit 上 suspend/resume 可能不存在：静音仍然成立（tone() 那侧已经短路），
+    // 只是上下文没停下来。不许因为停不下就把手感判断带崩。
+  }
+}
+
 // 单振荡器 + 两点音高滑 + 指数衰减。delay 用秒，调用方自己排节。
 function tone({ f0, f1 = f0, dur = 0.12, type = 'sine', gain = 0.22, delay = 0 }) {
+  // 静音态下 audio() 给的就是 null：这一句同时挡住了「新建振荡器」与「把上下文解回来」。
+  // 少任何一侧都不算静音——gain 设 0 只是听不见，节点照建、上下文照跑。
   const ac = audio();
-  if (!ac || !enabled) return;
+  if (!ac) return;
   const t = ac.currentTime + delay;
   const osc = ac.createOscillator();
   const vol = ac.createGain();
@@ -45,10 +64,14 @@ function tone({ f0, f1 = f0, dur = 0.12, type = 'sine', gain = 0.22, delay = 0 }
 }
 
 export const Sound = {
+  // 存档与界面说的是「音效开不开」，实现里只有「静音不静音」这一个状态——
+  // 两个名字一份真相，写侧只此一处。
   setEnabled(v) {
-    enabled = !!v;
+    setMuted(!v);
   },
-  enabled: () => enabled,
+  isMuted: () => muted,
+  // 给闸读的真值：静音之后上下文必须真的是 suspended，而不是只有个标志位。
+  contextState: () => (ctx ? ctx.state : 'none'),
 
   // 落子：向上的一挑，音高跟着数字大小走——玩家闭着眼能听出刚敲的是几。
   place(value = 1, size = 6) {
