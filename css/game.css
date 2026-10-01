@@ -9,8 +9,11 @@
 html, body {
   margin: 0;
   min-height: 100%;
-  background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 62%, var(--surface) 100%);
-  background-attachment: fixed;
+  /* 纸纹是生成的 grain.png（256×256，alpha 峰值 8/255）铺在渐变之上：不加它，页面是
+     两块纯色矢量；加得太重（alpha 再高一个数量级）就成了噪点。分层写法让纹样随页面
+     滚动、渐保持 fixed——两层共用一个 attachment 会让纹样在 iOS 上糊成一坨。 */
+  background: url('../assets/img/grain.png') repeat, linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 62%, var(--surface) 100%);
+  background-attachment: scroll, fixed;
   color: var(--ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -21,11 +24,19 @@ body { touch-action: manipulation; }
 #app {
   max-width: 1180px;
   margin: 0 auto;
-  padding: var(--space-page) var(--space-page) var(--space-inner);
+  /* 刘海、圆角、Home 指示条是硬件给的，不是设计能预留的：不并进 padding，iOS 上顶栏
+     那颗「静音」和底下键帽会被直接切掉。用 max() 而不是加法——安全区不够宽时保留页面
+     原本的呼吸感，够宽时以硬件为准，两者都不会把内容推到贴边。
+     viewport-fit=cover 在 index.html 里，没有它这四个 env() 恒为 0。 */
+  padding: max(var(--space-page), env(safe-area-inset-top))
+           max(var(--space-page), env(safe-area-inset-right))
+           max(var(--space-inner), env(safe-area-inset-bottom))
+           max(var(--space-page), env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: var(--space-card);
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -436,7 +447,12 @@ button.link {
 }
 
 @media (max-width: 460px) {
-  #app { padding: var(--space-inner) var(--space-inner) var(--space-inner); }
+  #app {
+    padding: max(var(--space-inner), env(safe-area-inset-top))
+             max(var(--space-inner), env(safe-area-inset-right))
+             max(var(--space-inner), env(safe-area-inset-bottom))
+             max(var(--space-inner), env(safe-area-inset-left));
+  }
   .brand h1 { font-size: 24px; }
   .stage, .panel { padding: var(--space-inner); }
   .pad button { min-height: 48px; font-size: 18px; }
