@@ -907,6 +907,7 @@
     };
     const gameCtl = census('对局页控件', ['#digit-pad button', '.pad-tools button', '.acts button', '.top-actions button']);
     censusHidden('隐藏的胜利遮罩', ['#win-veil', '#btn-again', '#btn-menu-2']);
+    censusHidden('隐藏的暂停遮罩', ['#pause-veil', '#btn-resume-play', '#btn-pause-menu']);
     ck('画布本身远大于触控下限', (() => { const r = box(); return r.width >= 44 && r.height >= 44; })(), JSON.stringify(box().width));
     ck('画布完整在视口里', box().right <= w.innerWidth + 1, `${Math.round(box().right)} vs ${w.innerWidth}`);
     ck('页面无横向溢出', document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, `${document.documentElement.scrollWidth} vs ${document.documentElement.clientWidth}`);
@@ -933,9 +934,9 @@
     eq('对局视图整块隐藏', $('#view-game').hidden, true);
     eq('没有存档时续档卡是隐藏的', $('#resume-card').hidden, true);
     censusHidden('隐藏的续档卡', ['#resume-card', '#btn-resume']);
-    const menuCtl = census('选档页控件', ['.tier', '.chapter', '#btn-daily', '#btn-sound', '#btn-motion']);
-    eq('选档页读数 = 5 档 + 20 关 + 3 顶部按钮', menuCtl, A().tiers.length + A().campaign.length + 3);
-    eq('对局页控件数 = 4 个数字键 + 3 工具 + 5 动作 + 3 顶栏', gameCtl, size + 3 + 5 + 3);
+    const menuCtl = census('选档页控件', ['.tier', '.chapter', '.top-actions button']);
+    eq('选档页读数 = 5 档 + 20 关 + 5 顶部按钮', menuCtl, A().tiers.length + A().campaign.length + 5);
+    eq('对局页控件数 = 4 个数字键 + 3 工具 + 5 动作 + 5 顶栏', gameCtl, size + 3 + 5 + 5);
     void total;
     $('.chapter[data-level="1"]').click();
     // 赢那一瞬间 renderer.celebrate() 起了一圈 900ms 的绿环（js/render/board.js:337 的 drawWin，

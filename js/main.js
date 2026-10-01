@@ -20,9 +20,15 @@ const VERSION = '1.0.0';
 const $ = (id) => document.getElementById(id);
 
 const el = {
+  app: $('app'),
   viewMenu: $('view-menu'),
   viewGame: $('view-game'),
   canvas: $('board'),
+  pauseVeil: $('pause-veil'),
+  btnPause: $('btn-pause'),
+  btnResumePlay: $('btn-resume-play'),
+  btnPauseMenu: $('btn-pause-menu'),
+  btnFull: $('btn-full'),
   tierList: $('tier-list'),
   chapterList: $('chapter-list'),
   recordList: $('record-list'),
@@ -72,6 +78,8 @@ let loopHandle = 0;
 let lastRejection = null;
 let currentTier = 'regular';
 let practiceCounter = 1;
+let lastTs = 0; // 上一帧的时间戳；0 = 循环此刻是停着的，下一帧不该背整段空闲
+let clockAccum = 0; // 累计的仿真秒：HUD 那一跳由它决定，而不是墙钟周期
 
 // ---- 小工具 ---------------------------------------------------------------------
 
@@ -87,11 +95,29 @@ function markDirty() {
   if (!loopHandle) loopHandle = requestAnimationFrame(tick);
 }
 
+/** 这一局的钟此刻该不该走：在对局页、没暂停、还没解完。 */
+function clockLive() {
+  return !el.viewGame.hidden && !game.paused && !game.won;
+}
+
 function tick(ts) {
   loopHandle = 0;
+  // dt 只来自帧间隔：这台机器是 30、60 还是 144Hz，都不该改变任何一处读数。
+  // 封顶 0.25 秒：标签页在后台被节流很久后回到前台，那一帧不该补上整段空闲。
+  const dt = lastTs ? Math.min(0.25, Math.max(0, (ts - lastTs) / 1000)) : 0;
+  lastTs = ts;
+  const live = clockLive();
+  if (live) {
+    clockAccum += dt;
+    while (clockAccum >= 1) {
+      clockAccum -= 1;
+      el.statTime.textContent = fmtTime(game.elapsedMs());
+    }
+  }
   const animating = renderer.draw(game, ts);
   dirty = false;
-  if (animating) loopHandle = requestAnimationFrame(tick);
+  if (animating || live) loopHandle = requestAnimationFrame(tick);
+  else lastTs = 0; // 停驻：下次 markDirty 起的第一帧 dt = 0
 }
 
 function say(text, tone = '') {
@@ -275,6 +301,7 @@ function showGame() {
   el.viewMenu.hidden = true;
   el.viewGame.hidden = false;
   el.winVeil.hidden = true;
+  syncPauseVeil();
   renderer.resize(game.size);
   buildPad();
   refresh();
@@ -452,13 +479,33 @@ game.addEventListener('win', (e) => {
   markDirty();
 });
 
-el.canvas.addEventListener('pointerdown', (ev) => {
+// 换局（setPuzzle 发的 'puzzle'）：动画现场跟着清零。anim 活在渲染器里，
+// 状态机重置不到它——不清的话新盘第一帧还带着上一局的弹跳与胜利描边。
+game.addEventListener('change', (e) => {
+  if (!e.detail || e.detail.what !== 'puzzle') return;
+  renderer.resetAnim();
+  clockAccum = 0; // 新盘从整秒起算，不带上一局那一秒的零头
+});
+
+function canvasDown(ev) {
   const cell = renderer.hitTest(ev.clientX, ev.clientY);
   if (cell < 0) return;
   game.select(cell);
   ev.preventDefault();
   markDirty();
-});
+}
+
+el.canvas.addEventListener('pointerdown', canvasDown);
+// 回落通道：老 WebKit 没有 pointer 事件。有 pointer 的浏览器一个都不挂——
+// 同时挂 touchstart 与 pointerdown 会让一次点击选中两次（暂停时那一下也被吃掉）。
+if (!('onpointerdown' in window)) {
+  el.canvas.addEventListener('touchstart', (ev) => {
+    const t = ev.changedTouches && ev.changedTouches[0];
+    if (!t) return;
+    canvasDown({ clientX: t.clientX, clientY: t.clientY, preventDefault: () => ev.preventDefault() });
+  }, { passive: false });
+  el.canvas.addEventListener('mousedown', canvasDown);
+}
 
 el.canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
 
@@ -469,6 +516,11 @@ el.pad.addEventListener('click', (ev) => {
 });
 
 function press(v) {
+  const stop = game.pausedWhy();
+  if (stop) {
+    say(stop.why, 'warn');
+    return;
+  }
   const before = game.ink[game.sel];
   const r = game.noteMode ? game.toggleNote(v) : game.inkValue(game.sel, v);
   if (r.ok) {
@@ -511,14 +563,7 @@ el.btnHint.addEventListener('click', () => {
 
 el.btnUndo.addEventListener('click', () => game.undo());
 
-el.btnRestart.addEventListener('click', () => {
-  game.restart();
-  buildPad();
-  Say_restart();
-  refresh();
-  markDirty();
-  persist();
-});
+el.btnRestart.addEventListener('click', restartGame);
 
 function Say_restart() {
   say('重开了：题面没变，墨水与计时归零。', 'warn');
@@ -556,13 +601,18 @@ el.btnResume.addEventListener('click', () => {
   if (!ok) say('那份存档对应的题面已经不在了（存档里的 ref 找不到对应关卡），只能重开。', 'bad');
 });
 
-el.btnSound.addEventListener('click', () => {
-  const on = !Store.setting('sound');
-  Store.setSetting('sound', on);
-  Sound.setEnabled(on);
-  el.btnSound.textContent = `音效 ${on ? '开' : '关'}`;
-  el.btnSound.setAttribute('aria-pressed', String(on));
+el.btnSound.addEventListener('click', () => setSound(!Store.setting('sound')));
+
+el.btnPause.addEventListener('click', () => setPaused(!game.paused));
+el.btnResumePlay.addEventListener('click', () => setPaused(false));
+el.btnPauseMenu.addEventListener('click', () => {
+  setPaused(false);
+  showMenu();
 });
+el.btnFull.addEventListener('click', toggleFullscreen);
+// 全屏态不由我们说了算：Esc、浏览器 UI、切走标签都会退出去。文案必须跟着真相走。
+document.addEventListener('fullscreenchange', syncFullButton);
+document.addEventListener('webkitfullscreenchange', syncFullButton);
 
 el.btnMotion.addEventListener('click', () => {
   const cur = document.documentElement.classList.contains('reduce-motion');
@@ -574,9 +624,107 @@ el.btnMotion.addEventListener('click', () => {
   Store.setSetting('reduceMotion', next);
 });
 
+// ---- 暂停：钟与输入一起停 ---------------------------------------------------------------
+// 停的是状态机里那一局本身（js/ui/game.js 的 pause/resume）；这里只负责演出来：
+// 纱盖住盘面（笼上的数字也跟着盖住——暂停不是换个角度偷看）、动画现场清零、存档落在冻结的耗时上。
+
+function syncPauseVeil() {
+  const on = game.paused;
+  el.pauseVeil.hidden = !on;
+  el.btnPause.textContent = on ? '继续' : '暂停';
+  el.btnPause.setAttribute('aria-pressed', String(on));
+}
+
+function setPaused(on) {
+  if (game.won) return; // 已经解完的局没有「暂停」可言，胜利纱在那儿
+  if (!(on ? game.pause() : game.resume())) return;
+  if (on) {
+    renderer.resetAnim(); // 弹跳与脉冲走的是墙上时钟，不停就还在动
+    persist(); // 存档停在冻结的那一秒
+  }
+  syncPauseVeil();
+  refresh();
+  markDirty();
+}
+
+// ---- 重开：题面不变，其余全清 -------------------------------------------------------------
+
+function restartGame() {
+  game.restart(); // 墨水/铅笔/撤销栈/步数/提示/计时（连同暂停态）都在 setPuzzle 里归零
+  renderer.resetAnim();
+  buildPad();
+  syncPauseVeil();
+  Say_restart();
+  refresh();
+  markDirty();
+  persist();
+}
+
+// ---- 全屏：挂在顶栏那颗真实存在的按钮上 ----------------------------------------------------
+
+const fullscreenOn = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+
+function syncFullButton() {
+  const on = fullscreenOn();
+  el.btnFull.textContent = on ? '退出全屏' : '全屏';
+  el.btnFull.setAttribute('aria-pressed', String(on));
+}
+
+function toggleFullscreen() {
+  if (fullscreenOn()) {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) Promise.resolve(exit.call(document)).catch(() => {});
+    return;
+  }
+  const host = el.app || document.documentElement;
+  const enter = host.requestFullscreen || host.webkitRequestFullscreen;
+  if (!enter) {
+    say('这个浏览器不给全屏。', 'warn');
+    return;
+  }
+  // 拒绝是常态（不在用户手势里、iOS 上根本没有元素全屏），所以只回一句话，不抛。
+  Promise.resolve(enter.call(host)).catch(() => say('全屏被拒了：得由你的点击/按键发起才给。', 'warn'));
+}
+
+function setSound(on) {
+  Store.setSetting('sound', on);
+  Sound.setEnabled(on);
+  el.btnSound.textContent = `音效 ${on ? '开' : '关'}`;
+  el.btnSound.setAttribute('aria-pressed', String(on));
+}
+
+// Enter/空格在焦点停着按钮时**不抢**：浏览器会把它当成对该按钮的激活，抢了就是一次动作两遍。
+const activatingButton = () => {
+  const a = document.activeElement;
+  return !!a && (a.tagName === 'BUTTON' || a.tagName === 'A');
+};
+const isStartKey = (k) => (k === 'Enter' || k === ' ' || k === 'Spacebar') && !activatingButton();
+
+function beginFromMenu() {
+  const r = Store.resume();
+  if (r && restoreResume(r)) return;
+  startPractice(currentTier);
+}
+
 window.addEventListener('keydown', (ev) => {
-  if (el.viewGame.hidden) return;
   const k = ev.key;
+  if (el.viewGame.hidden) {
+    if (isStartKey(k)) {
+      ev.preventDefault();
+      beginFromMenu();
+    }
+    return;
+  }
+  if (isStartKey(k)) {
+    ev.preventDefault();
+    setPaused(!game.paused);
+    return;
+  }
+  if (k === '?') {
+    ev.preventDefault();
+    showMenu(); // 玩法写在选档页上：那里有笼的规则与四条规则的原文
+    return;
+  }
   if (k >= '1' && k <= '9') {
     const v = Number(k);
     if (v <= game.size) {
@@ -588,6 +736,7 @@ window.addEventListener('keydown', (ev) => {
   if (k === '0' || k === 'Backspace' || k.toLowerCase() === 'e') {
     const r = game.erase();
     if (r.ok) Sound.erase();
+    else if (r.why) say(r.why, 'warn');
     refresh();
     markDirty();
     ev.preventDefault();
@@ -614,17 +763,16 @@ window.addEventListener('keydown', (ev) => {
     markDirty();
     ev.preventDefault();
   } else if (k.toLowerCase() === 'r') {
-    game.restart();
-    buildPad();
-    Say_restart();
-    refresh();
-    markDirty();
+    restartGame();
+    ev.preventDefault();
+  } else if (k.toLowerCase() === 'm') {
+    setSound(!Store.setting('sound'));
+    ev.preventDefault();
+  } else if (k.toLowerCase() === 'f') {
+    toggleFullscreen();
+    ev.preventDefault();
   }
 });
-
-setInterval(() => {
-  if (!el.viewGame.hidden && !game.won) el.statTime.textContent = fmtTime(game.elapsedMs());
-}, 1000);
 
 window.addEventListener('resize', () => {
   if (!el.viewGame.hidden && game.board) {
@@ -660,7 +808,9 @@ function restoreResume(r) {
     { keep: { ink: r.inkCells, notes: r.noteCells, moves: r.moves, hints: r.hints } }
   );
   game.restartTimer();
-  if (r.elapsedMs > 0) game.pausedMs = 0;
+  // 存档里的耗时属于这一局：接上之后钟要从那一秒继续走，否则「分次玩」能把纪录刷低。
+  // pausedMs 是「要从现在里扣掉的累计」——取负等于把起点往前挪 r.elapsedMs。
+  game.pausedMs = -Math.max(0, Math.round(r.elapsedMs || 0));
   const d = game.derive(true);
   if (d.res.conflict) {
     game.restart();
@@ -685,6 +835,8 @@ function boot() {
   el.btnMotion.textContent = `动效 ${reduce ? '简' : '全'}`;
   el.btnMotion.setAttribute('aria-pressed', String(!!reduce));
   el.buildStamp.textContent = `v${VERSION} · 战役 ${CAMPAIGN.levels.length} 关 · 存档键 ${Store.key}`;
+  syncPauseVeil();
+  syncFullButton();
   void Space;
 
   const r = Store.resume();
@@ -774,6 +926,16 @@ const api = {
     currentTier = made.tier;
     showGame();
     return api.state();
+  },
+  // 只给场景与帧率量具用：走的是玩家那条路（装配层的 setPaused / restartGame），
+  // 不是绕过闸门直改 game.paused——那样测出来的「暂停」是假的。
+  pause: (on = true) => {
+    setPaused(!!on);
+    return game.paused;
+  },
+  restart: () => {
+    restartGame();
+    return game.snapshot();
   },
   showMenu,
   solution: () => game.solutionOf(),

@@ -411,7 +411,15 @@ export function createRenderer(canvas) {
     };
   }
 
-  return { resize, draw, hitTest, pixelAt, geometry, notePop, pulse, celebrate, canvas: () => canvas };
+  /** 清掉动画现场：换局/重开/暂停都要它。
+   *  anim 里的时间戳是**墙上时钟**，不清的话新盘面第一帧就带着上一局的弹跳与胜利描边。 */
+  function resetAnim() {
+    anim.pops = new Map();
+    anim.hintPulse = null;
+    anim.winAt = 0;
+  }
+
+  return { resize, draw, hitTest, pixelAt, geometry, notePop, pulse, celebrate, resetAnim, canvas: () => canvas };
 }
 
 // 十六进制/rgb 颜色加透明度：只在描边脉冲里用，避免为了一次淡入引入第四种颜色。

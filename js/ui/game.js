@@ -52,7 +52,9 @@ export class Game extends EventTarget {
     this.hintRecent = []; // 最近念过的结论（内容身份，FIFO 最多 8 条）：连着按不许重复同一句话
     this.hintStamp = ''; // 它们属于哪个盘面签名：签名一变（落子/铅笔/换选中格）就清零
     this.startedAt = now();
-    this.pausedMs = 0;
+    this.pausedMs = 0; // 暂停累计时长：恢复时并入，只增不减
+    this.paused = false;
+    this.pauseAt = 0; // 进入暂停的那一刻；elapsedMs() 冻结在读它，而不是每秒再减一次
     this.won = false;
     this.ref = '';
     this.mode = Mode.practice;
@@ -176,12 +178,44 @@ export class Game extends EventTarget {
   }
 
   elapsedMs() {
-    return Math.max(0, Math.round(now() - this.startedAt - this.pausedMs));
+    // 冻结的是这一局的钟本身，不是它的显示：暂停期间读数停在 pauseAt，恢复后才继续走。
+    const cursor = this.paused ? this.pauseAt : now();
+    return Math.max(0, Math.round(cursor - this.startedAt - this.pausedMs));
   }
 
   restartTimer() {
     this.startedAt = now();
     this.pausedMs = 0;
+    this.paused = false;
+    this.pauseAt = 0;
+  }
+
+  /** 暂停：钟停住、输入闸门落下。墨水/铅笔/撤销栈/提示一概不动。 */
+  pause() {
+    if (!this.board || this.paused) return false;
+    this.paused = true;
+    this.pauseAt = now();
+    this.emit('pause', { elapsedMs: this.elapsedMs() });
+    return true;
+  }
+
+  resume() {
+    if (!this.paused) return false;
+    this.pausedMs += now() - this.pauseAt;
+    this.paused = false;
+    this.pauseAt = 0;
+    this.emit('resume', { elapsedMs: this.elapsedMs() });
+    return true;
+  }
+
+  togglePause() {
+    return this.paused ? this.resume() : this.pause();
+  }
+
+  /** 暂停态的共用闸门：改动这一局的每个入口都得先过它。只盖一层纱而键盘还在写字，那不叫暂停。 */
+  pausedWhy() {
+    if (!this.paused) return null;
+    return { ok: false, why: '暂停中：按空格或点「继续」回来' };
   }
 
   /** 整盘推导：脚本 + 冲突。墨水变了就要重算，所以缓存按「墨水指纹」失效。 */
@@ -234,6 +268,7 @@ export class Game extends EventTarget {
       goodCages: d.report.goodCages.size,
       cages: this.board ? this.board.cages.length : 0,
       won: this.won,
+      paused: this.paused,
       elapsedMs: this.elapsedMs(),
       solvable: d.res.ok || !d.res.conflict,
       level: d.res.level,
@@ -244,6 +279,7 @@ export class Game extends EventTarget {
   // ---- 输入 ---------------------------------------------------------------------
 
   select(cell) {
+    if (this.paused) return this;
     if (!this.board || cell < 0 || cell >= this.cells) return this;
     this.sel = cell;
     this.emit('select', { cell });
@@ -264,6 +300,7 @@ export class Game extends EventTarget {
   }
 
   toggleNoteMode(v = null) {
+    if (this.paused) return this.noteMode;
     this.noteMode = v === null ? !this.noteMode : !!v;
     this.emit('change', { what: 'noteMode' });
     return this.noteMode;
@@ -278,6 +315,8 @@ export class Game extends EventTarget {
   pressDigit(v) {
     const b = this.board;
     if (!b || this.sel < 0) return { ok: false, why: '先选一格' };
+    const stop = this.pausedWhy();
+    if (stop) return stop;
     if (v < 1 || v > b.size) return { ok: false, why: `这盘只用 1..${b.size}` };
     if (this.won) return { ok: false, why: '这一局已经解完了' };
     if (this.noteMode) return this.toggleNote(v);
@@ -317,6 +356,8 @@ export class Game extends EventTarget {
 
   erase() {
     if (!this.board || this.sel < 0) return { ok: false };
+    const stop = this.pausedWhy();
+    if (stop) return stop;
     if (!this.ink[this.sel] && !this.notes[this.sel]) return { ok: false, silent: true };
     this.pushHistory(this.sel);
     this.ink[this.sel] = 0;
@@ -332,6 +373,8 @@ export class Game extends EventTarget {
   pruneNotes(cell = this.sel) {
     const b = this.board;
     if (!b || cell < 0 || !this.notes[cell]) return { ok: false, silent: true };
+    const stop = this.pausedWhy();
+    if (stop) return stop;
     const d = this.derive();
     if (!d.res.ok && d.res.conflict) return { ok: false, why: d.res.conflict };
     const keep = d.res.masks ? d.res.masks[cell] : 0;
@@ -346,6 +389,8 @@ export class Game extends EventTarget {
   }
 
   undo() {
+    const stop = this.pausedWhy();
+    if (stop) return stop;
     const last = this.history.pop();
     if (!last) return { ok: false, why: '没有可撤销的动作了' };
     this.ink[last.cell] = last.ink;
@@ -369,6 +414,8 @@ export class Game extends EventTarget {
   hint() {
     const b = this.board;
     if (!b) return { ok: false };
+    const stop = this.pausedWhy();
+    if (stop) return stop;
     if (this.won) return { ok: false, why: '这一局已经解完了' };
     const d = this.derive(true);
     if (d.res.conflict) {

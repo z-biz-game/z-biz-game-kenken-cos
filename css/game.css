@@ -282,10 +282,34 @@ button.link {
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(8, 11, 22, 0.72);
+  background: var(--veil);
   border-radius: var(--radius-card);
   animation: rise var(--dur-base) var(--ease-ease);
 }
+
+/* 暂停纱：整块盘面（含笼上的目标数）盖在纱下——暂停不是换个角度偷看。
+   笼纹水印是 assets/gen/make_art.py 画的同一张母题：纱上得留一句「这里本来有盘」。 */
+#pause-veil {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: url('../assets/img/cage-motif.png') center 24% / 104px auto no-repeat, var(--veil);
+  border-radius: var(--radius-card);
+  animation: rise var(--dur-base) var(--ease-ease);
+}
+
+.pause-card {
+  text-align: center;
+  padding: var(--space-card);
+  background: var(--surface-lift);
+  border: 1px solid var(--line-heavy);
+  border-radius: var(--radius-card);
+  max-width: 86%;
+}
+.pause-card h3 { margin: 0 0 6px; font-size: 18px; }
+.pause-card p { margin: 0; font-size: 13px; color: var(--ink-dim); font-family: var(--font-mono); }
+.pause-actions { display: flex; gap: var(--space-gutter); justify-content: center; margin-top: var(--space-inner); }
 
 .win-card {
   text-align: center;
@@ -401,6 +425,7 @@ button.link {
 
 .reduce-motion .view,
 .reduce-motion #win-veil,
+.reduce-motion #pause-veil,
 .reduce-motion button { animation: none !important; transition: none !important; }
 
 /* ---------- 窄屏 ---------- */
