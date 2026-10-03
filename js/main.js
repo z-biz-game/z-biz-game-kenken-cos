@@ -928,3 +928,16 @@ if (document.readyState === 'loading') {
 } else {
   bootFullscreen();
 }
+
+// ---- 静音开关（M）-----------------------------------------------------------------
+// M 键切静音，与全屏/重开/提示同一套键位。
+// 这里只负责把按键翻译成"点一下音效按钮"：真静音在 js/audio/synth.js 里做
+// （suspend AudioContext + 静音态不再新建振荡器节点），偏好由它落盘到 localStorage。
+window.addEventListener('keydown', (ev) => {
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  if (ev.target && /^(input|textarea|select)$/i.test(ev.target.tagName || '')) return;
+  if (ev.key === 'm' || ev.key === 'M') {
+    ev.preventDefault();
+    $('#btn-sound').click();
+  }
+});
