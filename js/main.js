@@ -820,3 +820,111 @@ window.kenken = api;
 boot();
 
 export { api };
+
+// ---- 全屏开关 ----
+//
+// 绑到 index.html 的 HUD 里真实存在的 #btn-fullscreen。
+// 只在 js 里留一串 requestFullscreen 能骗过字符串扫描，但按钮不在 DOM 里就是死代码：
+// 玩家按不到，功能等于没做。所以 id 必须与 HTML 里的按钮对得上，缺失时要在控制台喊出来。
+//
+// 三套 API 一律**特性探测**，不做 UA 判断：iPhone 版 Safari 压根没有元素全屏（只有 <video> 能全屏），
+// 老 Edge 只认 ms 前缀，Firefox 认 moz 前缀。UA 字符串是猜的，方法在不在是量的，猜错就静默失效。
+function fsRoot() {
+  return document.documentElement;
+}
+
+function fsElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function fsRequest(root) {
+  // 老 Edge 的 msRequestFullscreen 挂在元素上，和标准名同一个位置，所以并排取即可。
+  return root.requestFullscreen || root.webkitRequestFullscreen || root.msRequestFullscreen || null;
+}
+
+// iOS Safari 会把非 video 元素的请求直接 reject 成 NotAllowedError。
+// 这个 promise 没人接就升级成 unhandledrejection，冒到 window.onerror——离屏预载时足以把整页判死。
+// 因此凡是可能返回 promise 的调用，返回值一律就地吞掉，绝不让拒绝逃出这一层。
+function fsQuiet(p) {
+  if (p && typeof p.catch === 'function') p.catch(() => {});
+  return p;
+}
+
+// 返回 true=请求进入，false=请求退出，null=不支持（调用方据此禁用按钮）。
+function toggleFullscreen(root) {
+  const req = fsRequest(root);
+  if (!req) return null;
+  if (fsElement()) {
+    // 退出侧同样要兜底：老 Edge 是 msExitFullscreen；万一三者皆无就当无事发生，不抛。
+    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+    if (exit) fsQuiet(exit.call(document));
+    return false;
+  }
+  // 部分实现（如被 Permissions-Policy 挡住的 iframe）会同步抛，所以 catch 和 .catch 两头都要接。
+  try {
+    fsQuiet(req.call(root));
+  } catch (err) {
+    // 拒绝即降级：静默保持当前形态，不冒泡、不打断这一局的其余逻辑。
+  }
+  return true;
+}
+
+function bindFullscreen(btn) {
+  const root = fsRoot();
+
+  // 状态回写：Esc 和 iOS 下滑手势退出时不会经过按钮，
+  // 只有 fullscreenchange 事件能把按钮的文案/字形拉回正确状态，否则它会一直假装自己在全屏里。
+  const sync = () => {
+    const on = !!fsElement();
+    btn.setAttribute('aria-pressed', String(on));
+    btn.textContent = on ? "退出全屏" : "全屏";
+    btn.title = on ? "退出全屏 (F)" : "全屏 (F)";
+    document.body.classList.toggle('is-fullscreen', on);
+    return on;
+  };
+
+  if (!fsRequest(root)) {
+    // 不支持就要说明为什么：只把按钮变灰，玩家会以为这活根本没做完。
+    btn.disabled = true;
+    btn.setAttribute('aria-disabled', 'true');
+    btn.title = '这个浏览器不提供元素全屏（iOS Safari 请用「添加到主屏幕」）';
+    return;
+  }
+
+  btn.addEventListener('click', () => {
+    toggleFullscreen(root);
+    sync();
+  });
+
+  document.addEventListener('fullscreenchange', sync);
+  document.addEventListener('webkitfullscreenchange', sync);
+
+  window.addEventListener('keydown', (ev) => {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    // 正在输入框里打字时不劫持按键，否则会打不出 f。
+    if (ev.target && /^(input|textarea|select)$/i.test(ev.target.tagName)) return;
+    if (ev.key === "f" || ev.key === "F") {
+      ev.preventDefault();
+      toggleFullscreen(root);
+      sync();
+    }
+  });
+
+  sync();
+}
+
+function bootFullscreen() {
+  const btn = document.getElementById("btn-fullscreen");
+  if (!btn) {
+    // 按钮被谁删掉了？在控制台喊出来，别让这个坑静默地烂在下一棒手里。
+    console.warn('[fullscreen] index.html 里找不到 #' + "btn-fullscreen" + '，全屏开关没有入口');
+    return;
+  }
+  bindFullscreen(btn);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootFullscreen);
+} else {
+  bootFullscreen();
+}
