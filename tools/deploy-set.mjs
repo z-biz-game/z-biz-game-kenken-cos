@@ -14,7 +14,8 @@
 //     背后的整条 import 图，以及每一站里的运行时路径（new URL / serviceWorker.register /
 //     scope / './' 打头的字面量）。逐个必须在产物里存在且非 0 字节。
 //   R 不许绝对路径：'/sw.js' 在 Pages 的 /<repo>/ 前缀下会跳出项目站点
-//   P 位图不许说谎：manifest 声明的 sizes 必须等于 PNG IHDR 的真实宽高
+//   P 位图不许说谎：manifest 声明的 sizes 必须等于 PNG IHDR 的真实宽高——文件图标读文件的
+//     IHDR，内联 data:image/png;base64 的图标解码后读同一段，两种都不许只信声明
 //
 // 防自己空转：条数钉在 EXPECT_CHECKS / EXPECT_ROWS，解析不到引用（而不是引用都齐）也是红。
 // 这两条会不会真的红由 tools/deploy-set-selftest.mjs 当场证明（那支脚本把仓库复制到临时目录、
@@ -23,6 +24,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -92,6 +94,16 @@ const present = (r) => {
   return fs.existsSync(f) && fs.statSync(f).size > 0;
 };
 
+// Pages 的项目站点挂在 https://<org>.github.io/<slug>/ 下面，产物目录只是这个前缀**后面**的
+// 东西。og:image 要写成绝对 URL（抓取器不会替我们补前缀），所以闸得先知道前缀是什么，否则
+// "把 slug 写错"与"图不存在"在闸眼里长得一模一样。
+// 来源只认仓里那一份声明：README 的 https://…github.io/<slug>。不认 basename(ROOT)——这一仓
+// 的 slug 与目录名可以不同（远端叫 pentapack-cos，目录叫 z-biz-game-pentapack-cos），而台架
+// 的副本目录名更是随路径漂（它在 /tmp/ds-selftest-xxx/repo 里跑），拿目录名推前缀等于让闸
+// 在副本上天生红。
+const PAGES = ((readIf(path.join(ROOT, 'README.md')) || '')
+  .match(/https?:\/\/[A-Za-z0-9._-]+\.github\.io\/[A-Za-z0-9._-]+/) || [])[0] || '';
+
 // ---- B：引用可达 ----
 // 引用不靠手打名单：只有一个入口，index.html 声明的取径；走多远由取径自己决定——每条引用
 // 解析出来是个 .js/.css 就把它也当作一站，模块图于是自己把整条链交出来。手打名单漏扫的时候
@@ -113,10 +125,13 @@ const SELF_REL = /['"](\.{1,2}\/[^'"\n]+)['"]/g;
 // 剩下的是「不带 ./ 的裸文件名」，只能靠调用点认。document.baseURI / serviceWorker.register /
 // scope 都以文档为基，所以那几条形成的引用依附在仓根；new URL(x, import.meta.url) 以**本文件**
 // 为基，这一条必须跟着文件走，跟着仓根走就查错了路径。
+// register 那一条在两个点号前后都留 \s*：链式调用换行是 JS 的寻常写法（`navigator.serviceWorker`
+// 一行、`.register(...)` 下一行），而这一条只用来决定**同一个字符串以什么为基**——认不出调用点
+// 不会少查一条引用，只会让它退回按本文件解析，于是把一行正确的 register('./sw.js') 报成缺文件。
 const CALL_SITES = [
   [/new URL\(\s*['"]([^'"]+)['"]\s*,\s*document\.baseURI/g, false],
   [/new URL\(\s*['"]([^'"]+)['"]\s*,\s*import\.meta\.url/g, true],
-  [/navigator\.serviceWorker\.register\(\s*['"]([^'"]+)['"]/g, false],
+  [/navigator\s*\.\s*serviceWorker\s*\.\s*register\(\s*['"]([^'"]+)['"]/g, false],
   [/\bscope:\s*['"]([^'"]+)['"]/g, false],
 ];
 
@@ -209,13 +224,16 @@ if (mf) {
     return n >= 192 && n < 512;
   });
   ok(small.length > 0, 'R6 manifest 有 192~511 的图标（触屏主屏要的那一档）', '');
-  // og:image 只在页面上确实写了这句话时成立：绝对 URL、并且指的就是产物里那一张。
+  // og:image 只在页面上确实写了这句话时成立：绝对 URL、指的就是**本站前缀下**的那一张，
+  // 而那张图真在产物里。相对写法（assets/og.png）是这一条最初要抓的缺陷：抓取器读的是别人
+  // 页面上的字符串，不会替 Pages 补 /<slug>/。但"绝对"本身不够——前缀抄错一个字母就是 404
+  // 的卡片，所以拿 README 那份声明当尺子，量的不是"像不像绝对 URL"而是"是不是本站那一张"。
   const og = html.match(/property="og:image"\s+content="([^"]+)"/);
   if (og) {
     const v = og[1].trim();
-    const p = v.replace(/^https?:\/\/[^/]+/, '').replace(/^\//, '');
-    ok(v.startsWith('https://') && present(decodeURIComponent(p)),
-      'R7 og:image 是绝对 URL 且那张图在产物里', `og:image=${v}`);
+    const detail = `og:image=${v} · README 声明的前缀 ${PAGES || '(解析不到)'}`;
+    ok(v.startsWith(PAGES + '/') && present(decodeURIComponent(v.slice(PAGES.length + 1))),
+      'R7 og:image 是本站绝对 URL 且那张图在产物里', detail);
   }
 }
 
@@ -239,17 +257,26 @@ for (let k = 0; k < refs.length; k += 1) {
     continue;
   }
   const code = stripComments(text, false);
-  for (const m of code.matchAll(SELF_REL)) push(r, m[1], dirOf(r));
+  // 调用点优先于 SELF_REL：同一个字符串在一份文件里被两种形式认到时，只有调用点知道浏览器
+  // 会拿谁作基。让 SELF_REL 也推进去不会多验一条——它按本文件解析出的那条路径根本没人请求，
+  // 于是 register('./sw.js')（以文档为基，要的是仓根那份）会被报成缺仓根以外的那一条路径。
+  const claimed = new Set();
   for (const [re, perFile] of CALL_SITES) {
-    for (const m of code.matchAll(re)) push(r, m[1], perFile ? dirOf(r) : '');
+    for (const m of code.matchAll(re)) { push(r, m[1], perFile ? dirOf(r) : ''); claimed.add(m[1]); }
+  }
+  for (const m of code.matchAll(SELF_REL)) {
+    if (!claimed.has(m[1])) push(r, m[1], dirOf(r));
   }
 }
 
 // 钉住的条数要有人能对着源码核：DEPLOY_SET_DUMP=1 把每一条引用连同出处与解析结果打出来。
 // 只打不计数，所以开着它跑，rows 与 EXPECT_ROWS 的关系不变。
+// 内联位图的 payload 只打前 40 个字符：一条 178 KB 的 data URI 打进管道会顶穿 stdout 的缓冲，
+// 而 process.exit() 不等它排干——出处表于是断在半路，读它的人（台架）拿到的是半条引用。
 if (process.env.DEPLOY_SET_DUMP) {
   for (const [from, spec, at] of refs) {
-    console.log('ref\t' + from + '\t' + spec + (at ? '\t@' + at : '') + '\t=> ' +
+    const shown = /^data:/i.test(spec) ? spec.slice(0, 40) + `…(${spec.length} B)` : spec;
+    console.log('ref\t' + from + '\t' + shown + (at ? '\t@' + at : '') + '\t=> ' +
       (external(spec) || spec.startsWith('/') ? '(不查：外链或绝对)' : resolveSpec(spec, at)));
   }
 }
@@ -274,23 +301,32 @@ ok(checks > 0, 'R11 至少解析出一条引用（0 条=引用没被读到，不
 ok(checks === EXPECT_CHECKS, `R12 引用条数等于钉在文件里的 EXPECT_CHECKS（${EXPECT_CHECKS}）`,
   '实际 ' + checks + ' 条：改了页面就把 EXPECT_CHECKS 一起改，别让它默默变少');
 
+let bitmaps = 0;
+const sized = new Set();
 // ---- D：位图不许说谎 ----
 // 口径与 R 段同一份 entries：凡是 manifest 里声明了 sizes 的 PNG，声明值必须等于 IHDR 真实宽高。
 // 同一张图被两处声明成同一个尺寸时只核一次，但缺文件的那条由 R 段点名，这里跳过不重复报。
-let bitmaps = 0;
-const sized = new Set();
+// 内联 base64 也是位图：只按"是不是 .png 文件"筛的话这一条对它们永远成立，声明 512x512 而图
+// 其实 192x192 查不出来。pour / staircase 把"仓里零二进制文件"写进了自己的测试（.png 一律不许存在），
+// 它们的图标只能住在 manifest 的 data URI 里——真宽高同样得从 IHDR 读，不能因为不是文件就放行。
 for (const e of entries) {
   if (!e.sizes) continue;
-  const r = rel(e.src);
-  if (!/\.png$/i.test(r)) continue;
+  const dm = /^data:image\/png;base64,([\s\S]+)$/i.exec(e.src);
+  const r = dm ? `data:image/png#${createHash('sha1').update(dm[1]).digest('hex').slice(0, 10)}` : rel(e.src);
+  if (!dm && !/\.png$/i.test(r)) continue;
   const key = r + '@' + String(e.sizes);
   if (sized.has(key)) continue;
   sized.add(key);
   bitmaps += 1;
-  const f = path.join(site, r);
-  if (!fs.existsSync(f)) continue; // R 段已经报过缺文件
-  const head = fs.readFileSync(f).subarray(0, 24);
-  const isPng = head.subarray(0, 8).toString('hex') === '89504e470d0a1a0a';
+  let head;
+  if (dm) {
+    head = Buffer.from(dm[1].replace(/\s+/g, ''), 'base64').subarray(0, 24);
+  } else {
+    const f = path.join(site, r);
+    if (!fs.existsSync(f)) continue; // R 段已经报过缺文件
+    head = fs.readFileSync(f).subarray(0, 24);
+  }
+  const isPng = head.length === 24 && head.subarray(0, 8).toString('hex') === '89504e470d0a1a0a';
   ok(isPng, `P1 ${r} 是真 PNG 容器`, '不是 PNG 签名');
   if (!isPng) continue;
   const w = head.readUInt32BE(16), h = head.readUInt32BE(20);
@@ -307,4 +343,5 @@ ok(rows + 1 === EXPECT_ROWS, `R13 这一次跑出的断言条数（含这一条�
 for (const f of fails) console.log('  FAIL ' + f);
 console.log(`部署集：${checks} 条引用（含 ${bitmaps} 张位图尺寸核对），失败 ${fails.length} 项`);
 console.log(`rows: ${rows} fail: ${fails.length}`);
-process.exit(fails.length === 0 && rows > 0 ? 0 : 1);
+// exitCode 而不是 exit()：exit() 不等 stdout 排干，长出处表会被截断在半条引用上。
+process.exitCode = fails.length === 0 && rows > 0 ? 0 : 1;
