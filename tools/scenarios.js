@@ -933,9 +933,11 @@
     eq('对局视图整块隐藏', $('#view-game').hidden, true);
     eq('没有存档时续档卡是隐藏的', $('#resume-card').hidden, true);
     censusHidden('隐藏的续档卡', ['#resume-card', '#btn-resume']);
-    const menuCtl = census('选档页控件', ['.tier', '.chapter', '#btn-daily', '#btn-sound', '#btn-motion']);
-    eq('选档页读数 = 5 档 + 20 关 + 3 顶部按钮', menuCtl, A().tiers.length + A().campaign.length + 3);
-    eq('对局页控件数 = 4 个数字键 + 3 工具 + 5 动作 + 3 顶栏', gameCtl, size + 3 + 5 + 3);
+    const menuCtl = census('选档页控件', ['.tier', '.chapter', '#btn-daily', '#btn-sound', '#btn-fullscreen', '#btn-motion']);
+    eq('选档页读数 = 5 档 + 20 关 + 4 顶部按钮', menuCtl, A().tiers.length + A().campaign.length + 4);
+    // 顶栏是 .top-actions 里**整把**按钮（日课 / 音效 / 全屏 / 动效），不是当初写下的三把：
+    // 这条数的是选择器命中的个数，所以加控件就得在这里回填，不然 16 对 15 的红只能说明文档旧了。
+    eq('对局页控件数 = 4 个数字键 + 3 工具 + 5 动作 + 4 顶栏', gameCtl, size + 3 + 5 + 4);
     void total;
     $('.chapter[data-level="1"]').click();
     // 赢那一瞬间 renderer.celebrate() 起了一圈 900ms 的绿环（js/render/board.js:337 的 drawWin，

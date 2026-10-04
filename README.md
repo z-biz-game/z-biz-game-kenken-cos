@@ -172,7 +172,7 @@ js/ui/game.js           一局的状态机：墨水、铅笔、撤销栈、提�
 js/render/board.js      画布：盘面几何、笼标签、像素
 js/store.js             单键存档：游程编码 + 逐字段消毒
 js/main.js              接线：三个视图、六个读数、harness 表面
-tools/                  engine-test / balance / bake / playtest.cjs / scenarios.js / verify.sh
+tools/                  engine-test / balance / bake / playtest.cjs / scenarios.js / verify.sh / assemble-site.sh / deploy-set.mjs / deploy-set-selftest.mjs
 ```
 
 ## 许可
