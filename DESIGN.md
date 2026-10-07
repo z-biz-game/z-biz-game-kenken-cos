@@ -18,8 +18,8 @@
 三件事共用一份代码是有代价的：它一错，三处一起错。所以配了两件制衡：
 
 1. 引擎的结论必须被一台**不含任何推理规则**的穷举机器逐格核对（§3）；
-2. `verify()` / `diagnose()`（`:902` / `:933`）与推导**分开写**：它们只读盘面，绝不读 `solve()` 写下的
-   中间状态。判胜走 `complete()`（`:925-927`）＝ `verify()` 一条问题都没有 + 一格不落都填了。
+2. `verify()`（`js/engine/kenken.js:902`）与 `diagnose()`（`js/engine/kenken.js:933`）都跟推导**分开写**：它们只读盘面，绝不读 `solve()` 写下的
+   中间状态。判胜走 `complete()`（`js/engine/kenken.js:925-927`）＝ `verify()` 一条问题都没有 + 一格不落都填了。
    提示逻辑写错，伪造不出一场胜利。
 
 `solve()` 绝不回溯（`js/engine/kenken.js:8-9`）。这不是性能取舍，是承诺的形状：一条会猜的求解器
@@ -27,29 +27,29 @@
 
 ## 2. 候选掩码：两种 0 绝不能混
 
-一格的状态是 `value`（0 = 还没落子，合法数字 1..N，所以 0 能当哨兵，`:13`）和 `mask`
-（候选集，`bit v` 表示数字 v 还可能是这一格，`:38`）。
+一格的状态是 `value`（0 = 还没落子，合法数字 1..N，所以 0 能当哨兵，`js/engine/kenken.js:13`）和 `mask`
+（候选集，`bit v` 表示数字 v 还可能是这一格，`js/engine/kenken.js:38`）。
 
 `mask === 0` 是**矛盾**，不是"没填"。把这两个 0 读成同一件事，无解盘就会被当成未填盘放出去——
-这个区分写在 `:33-36` 的注释里，并被 `tools/engine-test.mjs` 的「A 规则可靠 · 矛盾分门别类
+这个区分写在 `js/engine/kenken.js:33-36` 的注释里，并被 `tools/engine-test.mjs` 的「A 规则可靠 · 矛盾分门别类
 （一种病一句话）」26 条钉住：每种矛盾要说出不同的那句话，且带盘面坐标。
 
-`MAX_SIZE = 9`（`:14`）是掩码的编码上限（16 位），不是出货上限；出货最大 7²（§5）。
+`MAX_SIZE = 9`（`js/engine/kenken.js:14`）是掩码的编码上限（16 位），不是出货上限；出货最大 7²（§5）。
 
 ## 3. 两套互不信任的实现
 
 `js/engine/count.js` 全文没有一条 `import`。它与 `kenken.js` 之间**只共享「题面文本」这一件事**：
-自己解析笼（`parsePuzzle`，`:20`）、自己判算术、自己查行列重复。规则表、界、候选掩码一概不用——
-共享了常量表就只是自己跟自己一致（`:1-10`）。
+自己解析笼（`parsePuzzle`，`js/engine/count.js:19`）、自己判算术、自己查行列重复。规则表、界、候选掩码一概不用——
+共享了常量表就只是自己跟自己一致（`js/engine/count.js:1-10`）。
 
 它只回答"这个题面有几个解"，并且诚实报告没数完的情况：
 
-- 状态四种：`UNIQUE` / `MANY` / `NONE` / `OVERBUDGET`（`:11-14`）；
-- 预算是**硬上限**：`if (nodes >= budget)` 先判再走（`:104`）。写成 `nodes++ > budget` 会先自增
+- 状态四种：`UNIQUE` / `MANY` / `NONE` / `OVERBUDGET`（`js/engine/count.js:11-14`）；
+- 预算是**硬上限**：`if (nodes >= budget)` 先判再走（`js/engine/count.js:104`）。写成 `nodes++ > budget` 会先自增
   再判，节点数冲到 `budget+2` 才回头——"数到预算就老实说没数完"这句话自己就没守住。这条纠正是
   `cf3794f` 那次做的，浏览器闸现在直接拿 `budget=50` 复踩这个口径：小预算下必须如实报
   `OVERBUDGET`，且 `nodes` 一字不许越过 50（`tools/scenarios.js:378-380`）；
-- `OVERBUDGET` 永远不算唯一（`:142`），`NONE` 必须由"穷举走完了"来支撑。
+- `OVERBUDGET` 永远不算唯一（`js/engine/count.js:142`），`NONE` 必须由"穷举走完了"来支撑。
 
 出货要求两套代码在同一批题上给出**逐格相同**的答案（`js/engine/generate.js:165-170`）。
 浏览器侧还钉了一组正反例（`tools/scenarios.js:383-396`）：把第 1 关那只单格笼的目标数改成 4 阶盘
@@ -61,10 +61,10 @@
 ## 4. 四条规则的分工：谁也不是挂饰
 
 `Rules`（`js/engine/kenken.js:401-431`）四条，权重 1 / 2 / 2.5 / 3.5；`RULE_LIST` 是它们的求值顺序（`:432`）。
-规则③的笼赋值枚举有硬预算 `ASSIGN_BUDGET = 3000`（`:434`）。
+规则③的笼赋值枚举有硬预算 `ASSIGN_BUDGET = 3000`（`js/engine/kenken.js:434`）。
 
 "②是不是③的简化版"这类问题不靠读代码回答：`solve()` 留了两个**只供测试**的旋钮
-（`opts.rules` 走单条规则、`opts.budget` 把③的枚举预算压到 1，`:535-540`），于是每一条都能被
+（`opts.rules` 走单条规则、`opts.budget` 把③的枚举预算压到 1，`js/engine/kenken.js:535-540`），于是每一条都能被
 单独关掉去实测它的贡献。「A 规则可靠 · 四条规则的分工（谁也不是挂饰）」18 条钉的就是这件事，
 同族还有 anchor ①②③④ 四节（12/…/17 条）。
 
@@ -78,29 +78,29 @@
 
 | 步骤 | 函数 | 做什么 |
 |---|---|---|
-| ① 种一个解 | `randomLatin`（`:69`） | 先造一张 `1..N` 的正方形拉丁方——题面是从答案长出来的，不是反过来 |
-| ② 划笼 | `randomCages`（`:88`） | 按 `cageDist` 抽出笼的尺寸分布，连通的格子团 |
-| ③ 配运算符 | `assignOps`（`:128`） | 给每只笼挑一个算得通的运算符与目标数（`opMix` 控制口味） |
-| ④ 验收 | `accept`（`:156`） | 铅笔推满 → 独立验算 `verify/complete` → 计数器 `UNIQUE` → 两套实现逐格同解 |
+| ① 种一个解 | `randomLatin`（`js/engine/generate.js:69`） | 先造一张 `1..N` 的正方形拉丁方——题面是从答案长出来的，不是反过来 |
+| ② 划笼 | `randomCages`（`js/engine/generate.js:88`） | 按 `cageDist` 抽出笼的尺寸分布，连通的格子团 |
+| ③ 配运算符 | `assignOps`（`js/engine/generate.js:128`） | 给每只笼挑一个算得通的运算符与目标数（`opMix` 控制口味） |
+| ④ 验收 | `accept`（`js/engine/generate.js:156`） | 铅笔推满 → 独立验算 `verify/complete` → 计数器 `UNIQUE` → 两套实现逐格同解 |
 
-第 ④ 步任何一环不过就 `rejected++` 换下一张（`:232-262`）。之后才轮到难度分 `difficulty()`（`:194`）
-把这张盘折算成 0..100，落不进 `TIERS[].band` 的丢掉。`buildPuzzle`（`:142`）是 ①②③ 的合体。
+第 ④ 步任何一环不过就 `rejected++` 换下一张（`js/engine/generate.js:232-262`）。之后才轮到难度分 `difficulty()`（`js/engine/generate.js:194`）
+把这张盘折算成 0..100，落不进 `TIERS[].band` 的丢掉。`buildPuzzle`（`js/engine/generate.js:142`）是 ①②③ 的合体。
 
-档位在 `TIERS`（`:314-360`）：五档各自的 `size / cageDist / opMix / band`，`makePuzzle`（`:367`）
-是"档位 + 原始种子 → 一局可出货的题"，`probe`（`:389`）只报告不判定（`tries=1`、不设 band），
+档位在 `TIERS`（`js/engine/generate.js:314-360`）：五档各自的 `size / cageDist / opMix / band`，`makePuzzle`（`js/engine/generate.js:367`）
+是"档位 + 原始种子 → 一局可出货的题"，`probe`（`js/engine/generate.js:389`）只报告不判定（`tries=1`、不设 band），
 专供 `tools/balance.mjs` 量原始分布。
 
-**难度分为什么长这样**：`40×load + 25×heavy + 15×depth + 20×span`（`:191`）。最初的
+**难度分为什么长这样**：`40×load + 25×heavy + 15×depth + 20×span`（`js/engine/generate.js:191`）。最初的
 「结论条数 × 权重」被 80 张一批的实测否了——它几乎只跟边长走，同阶盘里送分题反而比硬题高
-（`:177-190` 记着这段）。四个新量全部跟边长无关，只留一个温和的 `span`。
-`difficultyParts`（`:209`）把分量单独交出来，`balance` 因此能印"重规则占比"这类可解释的列，
+（`js/engine/generate.js:177-190` 记着这段）。四个新量全部跟边长无关，只留一个温和的 `span`。
+`difficultyParts`（`js/engine/generate.js:209`）把分量单独交出来，`balance` 因此能印"重规则占比"这类可解释的列，
 而不是只给一个总分。
 
 ## 6. 撤销栈的记账：谁收过费，谁才退得起
 
 状态机的四个写动作都进同一座栈（`js/ui/game.js:272-275` 的 `pushHistory`），但只有三个计费：
 落子 `inkValue`（`:287`）、记铅笔 `toggleNote`、擦掉 `erase` 各自 `moves++`；
-`pruneNotes`（`:332`）**不**计费——它不改题面，只擦掉引擎已经证明不可能的那笔候选。
+`pruneNotes`（`js/ui/game.js:332`）**不**计费——它不改题面，只擦掉引擎已经证明不可能的那笔候选。
 
 计费与入栈是两件事，撤销就必须同时看得见两件事。原先 `undo()` 无条件
 `moves = max(0, moves-1)`，于是「清理铅笔 + 撤销」这一对能把步数**凭空退掉一步**：
@@ -119,16 +119,16 @@
 ## 7. 存档：一个键、两侧 36 进制、对不上数就整份丢
 
 `localStorage` 里只有一个键 `kenken.save.v1`（`js/store.js:13`）。墨水与铅笔都是游程编码：
-`${v.toString(36)}x${c.toString(36)}`（`:35`）——**值与个数都走 36 进制**，个数不是十进制串。
-写侧的游程合并上限是 `n < 1296 = 36²`（`:37`），这正好印证两位 36 进制的容量；解码端用
-`parseInt(..., 36)` 读回来（`:60`）。一张 4 阶空盘写作 `0xg`（16 → `"g"`），实测整份存档 371 字节。
+`${v.toString(36)}x${c.toString(36)}`（`js/store.js:35`）——**值与个数都走 36 进制**，个数不是十进制串。
+写侧的游程合并上限是 `n < 1296 = 36²`（`js/store.js:37`），这正好印证两位 36 进制的容量；解码端用
+`parseInt(..., 36)` 读回来（`js/store.js:60`）。一张 4 阶空盘写作 `0xg`（16 → `"g"`），实测整份存档 371 字节。
 写出去必须能原样读回来，所以浏览器闸同时断串与断解码（`tools/scenarios.js` 的 play 场景）。
 
 消毒的三条契约（`js/store.js:10`、`sanitize()` 在 `:129`）：
 
-- **size 越界整份丢掉**，不许钳到合法值再拿原来的墨水去配另一张盘（`:179`）——那是替玩家变出一张盘；
-- **脏段跳过它占的那几格**，游标照常推进（`:62-65`）：不推进就等于把后半串整体往左挪一格；
-- **一格装得下的最大值是 `MAX_CELL = 1023`**（`:51`），墨水 0..9、候选掩码最多 `fullMask(9) = 1022`。
+- **size 越界整份丢掉**，不许钳到合法值再拿原来的墨水去配另一张盘（`js/store.js:179`）——那是替玩家变出一张盘；
+- **脏段跳过它占的那几格**，游标照常推进（`js/store.js:62-65`）：不推进就等于把后半串整体往左挪一格；
+- **一格装得下的最大值是 `MAX_CELL = 1023`**（`js/store.js:50`），墨水 0..9、候选掩码最多 `fullMask(9) = 1022`。
   超出就不是"一格的值"。`Uint16Array` 会把 70000 悄悄绕回 4464，那是静默换盘。
 
 存档存的是**原始种子与题面出处**（`ref: 'level-1'`、`seed`、`tier`、`size`、`moves`、`hints`、
@@ -149,13 +149,13 @@
 那条覆盖率就是在碰运气。现在算的是 `drawBoardBase` 真正填过的那块圆角矩形
 （`roundRect(left-3, top-3, boardPx+6, boardPx+6, Cell.max/4)`，`js/render/board.js:117`），
 四个角各扣掉 `r²(1−π/4)`；这是**下界**（抗锯齿只会多出一圈毛边），所以给 `>=` 而不打折。
-笼标签同理：宽度取 `measureText(label).width + 4`（`:202`、`:204`，字体在 `:195`），
+笼标签同理：宽度取 `measureText(label).width + 4`（`js/render/board.js:202`、`js/render/board.js:204`，字体在 `js/render/board.js:195`），
 覆盖率门槛从 25% **提高**到 50%，并且另加一条"在字压不到的那一行直接量底衬的首末像素"——
 宽度对不对不再靠覆盖率说话。
 
 ## 9. 战役目录：烤炉是唯一出处
 
-`js/data/campaign.js` 是 `tools/bake.mjs` 的产物，20 关、4 章、每章 5 关（`perChapter: 5`，`:7-8`）。
+`js/data/campaign.js` 是 `tools/bake.mjs` 的产物，20 关、4 章、每章 5 关（`perChapter: 5`，`js/data/campaign.js:7-8`）。
 每关带八个读数：`score / steps / elims / rounds / ruleLevel / enumCost / cages / countNodes`，
 外加 `text`（题面）与 `answer`。种子是显式串（`kenken-campaign-v1-c1-newcomer`），不是按日期算的。
 
@@ -179,16 +179,21 @@ npm run check                                → OK
 node tools/engine-test.mjs                   → 655/655（A 规则 13 节 / B 生成 4 节 / C 状态机 4 节 / D 存档 1 节）
 SAMPLES=24 node tools/balance.mjs            → 五档中位数 31.5 < 38.7 < 43.6 < 46.5 < 60.6，退出码 0
 node tools/bake.mjs --check                  → 与重烤结果逐字节一致
+node tools/docs-test.mjs                     → 解析 117 条引用 / 28 条判据，0 失败
 bash tools/verify.sh                         → root 324 条 + prefix 324 条，各 0 失败，整轮 17.5 秒
 BASE_URL=<已部署站点> bash tools/verify.sh    → 只跑那一种形态（tools/verify.sh:164-166）：324 条 0 失败、10.0 秒
 ```
+
+本文里每一条 `path:行号` 都由 `node tools/docs-test.mjs` 开回文件对账；口径、第一轮咬到的四处坏，
+以及这一腿**没**覆盖什么，写在 `README.md` 的「文档行号对账」一节。往本文里加行号之前先想清楚：
+这一腿会把它们全部读回来。
 
 远端首跑（2026-09-28 05:3x，`.github/workflows/ci.yml` 的 `check` + `browser` 两个 job 与
 `Deploy to GitHub Pages`）三条都绿；Pages 是在 push **之前**用 `build_type: workflow` 开好的，
 所以那一次抢跑没有发生（新开仓先推后开，`configure-pages` 就会 404）。
 
-`tools/verify.sh` 的默认场景清单是 `first engine fingerprint play ui`（`:137`），端口 5315 / CDP 9365
-（`:27`、`:24`），两种 URL 形态在同一端口上轮流起服务器：root 用仓自己的 `server.cjs`，prefix 用
-「一个只含本仓软链的目录」交给 `python3 -m http.server`（`:97-110`）。起跑之前有一段 pre-flight
-（`:112-120`）：先把服务着的字节跟聪明格自己对一遍——撞号端口上"验收"成一个陌生页面，
+`tools/verify.sh` 的默认场景清单是 `first engine fingerprint play ui`（`tools/verify.sh:137`），端口 5315 / CDP 9365
+（`tools/verify.sh:27`、`tools/verify.sh:24`），两种 URL 形态在同一端口上轮流起服务器：root 用仓自己的 `server.cjs`，prefix 用
+「一个只含本仓软链的目录」交给 `python3 -m http.server`（`tools/verify.sh:97-110`）。起跑之前有一段 pre-flight
+（`tools/verify.sh:112-120`）：先把服务着的字节跟聪明格自己对一遍——撞号端口上"验收"成一个陌生页面，
 是这套门禁最不肯接受的绿。

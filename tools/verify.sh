@@ -185,6 +185,11 @@ else
 fi
 
 kill $WD 2>/dev/null
+# 文档行号对账：README / DESIGN 里印着的每一条 `path:NN` 都要读回盘上对账。它放在这里而不是开头，
+# 是因为本仓的文档指着 tools/verify.sh 自己的行号（:24 / :27 / :97-110 / :112-120 / :137 / :164-166）——
+# 往这份整闸里插东西时，插入点必须落在最后一条被引用的行之后，否则闸改的是自己的证据。
+echo "=== doctest ==="
+node tools/docs-test.mjs || FAILED=1
 # 部署集闸：ci.yml 跑这两步、本地整闸以前一次都不跑。缺这一步就是「本地全绿、线上 404 自己的
 # manifest / sw.js / 图标」这一整类坏法。它不碰 Chrome，也不读页面，纯查产物。
 echo "=== deploy-set ==="

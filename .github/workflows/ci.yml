@@ -27,6 +27,11 @@ jobs:
       - name: Engine tests
         run: node tools/engine-test.mjs
 
+      # 本文里印着几十条 `path:行号`，写那句话的时候没有任何机器核过。这一闸把每条引用读回盘上对账：
+      # 文件在不在、行号在不在界内、被指的那几行是不是真有它说的那个标识符。
+      - name: Doc citations reconcile (文档行号对账)
+        run: node tools/docs-test.mjs
+
       # 难度阶梯是承诺不是文案：band 是选取目标，这一招会在某一档不再落进自己的带、
       # 或中位数不再严格递增时变红。
       - name: Difficulty ladder is still measured
