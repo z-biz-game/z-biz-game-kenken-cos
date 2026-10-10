@@ -670,21 +670,6 @@ function syncFullButton() {
   el.btnFull.setAttribute('aria-pressed', String(on));
 }
 
-function toggleFullscreen() {
-  if (fullscreenOn()) {
-    const exit = document.exitFullscreen || document.webkitExitFullscreen;
-    if (exit) Promise.resolve(exit.call(document)).catch(() => {});
-    return;
-  }
-  const host = el.app || document.documentElement;
-  const enter = host.requestFullscreen || host.webkitRequestFullscreen;
-  if (!enter) {
-    say('这个浏览器不给全屏。', 'warn');
-    return;
-  }
-  // 拒绝是常态（不在用户手势里、iOS 上根本没有元素全屏），所以只回一句话，不抛。
-  Promise.resolve(enter.call(host)).catch(() => say('全屏被拒了：得由你的点击/按键发起才给。', 'warn'));
-}
 
 function setSound(on) {
   Store.setSetting('sound', on);
