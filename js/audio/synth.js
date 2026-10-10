@@ -7,13 +7,18 @@
 
 let ctx = null;
 let master = null;
-// 静音是**两件**事：不再产生新的声音，以及已经在跑的 AudioContext 真的停下来。
-// 只把 master 的 gain 设成 0 是假静音——上下文照样在跑、照样耗电，而且任何一次
-// `audio()` 都会顺手把 suspended 解回来（这条在本仓是真会发生的，见下面的 muted 短路）。
-let muted = false;
+let enabled = true;
+// 静音偏好：读回存档。放在模块顶层，这样每次 init（首屏、开局、重开）都拿到同一个答案，
+// 重开一局不会把玩家的静音选择洗掉。
+try {
+  if (localStorage.getItem('cos.mute') === '1') enabled = false;
+} catch { /* 读不到就沿用默认开声 */ }
+
 
 function audio() {
-  if (muted) return null; // 静音态连上下文都不碰：一次 resume() 就把「已挂起」洗成「在跑」
+  // 静音态第一行就返回：既不把已挂起的 ctx 拉起来，也不新建节点。
+  // 这条比 "gain 设 0" 强一档——静音时这个 AudioContext 根本没有在跑。
+  if (!enabled) return null;
   if (typeof AudioContext === 'undefined' && typeof webkitAudioContext === 'undefined') return null;
   if (!ctx) {
     const Ctor = typeof AudioContext !== 'undefined' ? AudioContext : webkitAudioContext;
@@ -67,7 +72,21 @@ export const Sound = {
   // 存档与界面说的是「音效开不开」，实现里只有「静音不静音」这一个状态——
   // 两个名字一份真相，写侧只此一处。
   setEnabled(v) {
-    setMuted(!v);
+    const on = !!v;
+    if (on === enabled) return;
+    enabled = on;
+    // 真静音：停掉 AudioContext 本身（时钟停、图不跑），不是把音量拧到 0。
+    if (ctx) {
+      if (on) {
+        if (ctx.state === 'suspended' && ctx.resume) ctx.resume().catch(() => {});
+      } else if (ctx.state === 'running' && ctx.suspend) {
+        ctx.suspend().catch(() => {});
+      }
+    }
+    // 偏好落盘：刷新页面后 init 要能读回静音态，不能自己弹回来。
+    try {
+      localStorage.setItem('cos.mute', on ? '1' : '0');
+    } catch { /* 隐私模式下写不进去也不该炸游戏 */ }
   },
   isMuted: () => muted,
   // 给闸读的真值：静音之后上下文必须真的是 suspended，而不是只有个标志位。

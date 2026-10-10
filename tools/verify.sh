@@ -21,7 +21,7 @@ set -u
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 REPO=$(basename "$HERE")
 # 9365：DevTools 端口（server.cjs:20 那行注释钉的就是 5315/9365 这一对）。
-PORT=${CDP_PORT:-9365}
+PORT=${CDP_PORT:-9365}; if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then echo ":$PORT is already LISTENING — a sibling gate or an orphan Chrome holds it; attaching there reads someone else's browser. Wait for it to finish, or rerun with CDP_PORT=<a free port>." >&2; lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >&2 || true; exit 6; fi  # 一机一台：撞在同一个默认口上时不报错的是 Chrome，报错的是绿——先让路再开闸
 # 5315：本仓在 z-biz-game 端口表里占的号；5311–5314 是兄弟仓的，撞号等于把「验收」
 # 变成「看了一个陌生页面」。
 HTTP=${HTTP_PORT:-5315}
@@ -185,5 +185,15 @@ else
 fi
 
 kill $WD 2>/dev/null
+# 文档行号对账：README / DESIGN 里印着的每一条 `path:NN` 都要读回盘上对账。它放在这里而不是开头，
+# 是因为本仓的文档指着 tools/verify.sh 自己的行号（:24 / :27 / :97-110 / :112-120 / :137 / :164-166）——
+# 往这份整闸里插东西时，插入点必须落在最后一条被引用的行之后，否则闸改的是自己的证据。
+echo "=== doctest ==="
+node tools/docs-test.mjs || FAILED=1
+# 部署集闸：ci.yml 跑这两步、本地整闸以前一次都不跑。缺这一步就是「本地全绿、线上 404 自己的
+# manifest / sw.js / 图标」这一整类坏法。它不碰 Chrome，也不读页面，纯查产物。
+echo "=== deploy-set ==="
+node tools/deploy-set.mjs || FAILED=1
+node tools/deploy-set-selftest.mjs || FAILED=1
 [ $FAILED -eq 0 ] && echo "=== ALL GREEN（两种 URL 形态各自跑完） ===" || echo "=== FAILURES ABOVE ==="
 exit $FAILED
