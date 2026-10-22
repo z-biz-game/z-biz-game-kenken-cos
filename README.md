@@ -36,18 +36,18 @@ check`、`bake --check` 是当场重跑的；难度分位表与浏览器门禁�
 ## 怎么玩
 
 - 五档：初学 4²、上手 5²、熟练 5²、高阶 6²、大师 7²（`js/engine/generate.js:314-360`），外加按天换题的
-  日课（`js/main.js:83` 把当天日期变成种子、`js/data/library.js` 的 `dailyLevel` 按天序定档）和
+  日课（`js/main.js:95`（`todayKey`）把当天日期变成种子、`js/data/library.js` 的 `dailyLevel` 按天序定档）和
   20 关四章的战役目录（`js/data/campaign.js`，烤炉见下文）。
 - 落子：`点格子` 选中 · `1..N` 落子 · `P` 铅笔开关 · `0/⌫` 擦 · `H` 提示 · `Z` 撤销 · `方向键` 移动
-  （`index.html:136`）。铅笔模式下数字键记候选而不是落子；落了子那一格的铅笔自动作废
+  （`index.html:139`）。铅笔模式下数字键记候选而不是落子；落了子那一格的铅笔自动作废
   （`js/ui/game.js:298`）。
 - 「清理铅笔」是给懒人的工具：它只擦掉引擎**已经证明不可能**的候选，不改题面、不占步数
   （`js/ui/game.js:332-346`）。它进撤销栈，所以撤得回来；正因为当初没计费，撤销它也不退步
   （`js/ui/game.js:357`，理由见本文最后两节）。
 - 提示是"下一步可证的事实"：说出哪一格必须是什么、凭四条里的哪一条、看的哪个笼，计费一次；
-  它不替玩家填格子（`index.html:125`，纪律钉在 `tools/engine-test.mjs` 的「C 状态机 · 提示不是答案」）。
-  你自己已经填反了的时候，键盘那条路对盘外数字是「什么都不做」（`js/main.js:582` 的 `v <= size` 闸）。
-- 侧栏六个读数（步数 / 提示 / 已落子 / 算对的笼 / 冲突格 / 难度实测，`index.html:115-120`）全部由
+  它不替玩家填格子（`index.html:128`，纪律钉在 `tools/engine-test.mjs` 的「C 状态机 · 提示不是答案」）。
+  你自己已经填反了的时候，键盘那条路对盘外数字是「什么都不做」（`js/main.js:586` 的 `v <= size` 闸）。
+- 侧栏六个读数（步数 / 提示 / 已落子 / 算对的笼 / 冲突格 / 难度实测，`index.html:118-123`）全部由
   引擎现算，不是界面自己数格子。
 - 存档只有一份、一个键 `kenken.save.v1`（`js/store.js:13`）：接着上次那盘继续，墨水与铅笔都是
   游程编码（实测一张 4 阶盘的整份存档 371 字节，`tools/scenarios.js` 的 play 场景量到的）。
@@ -75,9 +75,9 @@ check`、`bake --check` 是当场重跑的；难度分位表与浏览器门禁�
 - **不承诺 8 阶以上**。引擎的候选集是 16 位掩码，`MAX_SIZE = 9` 是编码上限（`js/engine/kenken.js:14`），
   但五档出货最大 7²。8、9 阶没有任何一条断言为它们作保。
 - **有代码、但浏览器闸没断言过的分支**：菜单上的「音效」「动效」两个开关，闸只把它们当作控件量了
-  点击盒尺寸（`tools/scenarios.js:936` 的 `census`），**从没点过它们**，也就没断言过按下之后
+  点击盒尺寸（`tools/scenarios.js:937` 的 `census`），**从没点过它们**，也就没断言过按下之后
   WebAudio 是否真的静音、`prefers-reduced-motion` 那条链路是否真的换了动效档
-  （`js/main.js:563-572`、`:680-685`）。
+  （`js/main.js:567-576`、`:698-703`）。
 - **只在 headless Chrome 里绿过**。Safari、Firefox、真机 iOS/Android、低配设备未经验证。
   `bash tools/verify.sh` 跑的是本机 root 形态与本机带 `/z-biz-game-kenken-cos/` 前缀的两种 URL
   （两种形态各 324 条，2026-09-28 实测，整轮 17.5 秒）。第三种形态也跑过了——已部署的
@@ -130,19 +130,19 @@ SAMPLES=24 的实测分位表（2026-09-28，`node tools/balance.mjs` 的 stdout
 
 ```
 npm run check                        # 每个源文件过一遍 node --check（含 tools/scenarios.js）
-node tools/engine-test.mjs           # 655 条断言：A 规则可靠 / B 生成保证 / C 状态机 / D 存档形状
+node tools/engine-test.mjs           # 677 条断言：A 规则可靠 / B 生成保证 / C 状态机 / D 存档形状
 node tools/docs-test.mjs             # 本文与 DESIGN 里每一条 `path:行号` 读回盘上对账
 SAMPLES=24 node tools/balance.mjs    # 难度阶梯：三道闸，全过才退出码 0
 node tools/bake.mjs --check          # 战役目录与烤炉逐字节一致，且 20 关重烤重验
-bash tools/verify.sh                 # 真 headless Chrome：五种场景 × 两种 URL 形态 = 648 条
+bash tools/verify.sh                 # 真 headless Chrome：五种场景 × 两种 URL 形态 = 650 条
 ```
 
-- `node tools/engine-test.mjs` 本次实测 **655/655**，分节里最重的三节是
+- `node tools/engine-test.mjs` 本次实测 **677/677**，分节里最重的三节是
   「B 生成保证 · 出货验收链」120 条、「A 规则可靠 · 验收与诊断」35 条、「C 状态机 · 一局的生命周期」18 条。
 - `bash tools/verify.sh` 的五个场景按默认顺序是 `first engine fingerprint play ui`
   （`tools/verify.sh:137`），各自 42 / 37 / 15 / 135 / 95 条，两种 URL 形态各跑一遍、每条都 0 失败。
   断言读的是 DOM 几何与**画布像素**（笼标签底衬铺到哪一列、盘面那一方落了多少像素、命中点能不能落到
-  控件上），不读内部标志位；harness 表面的契约写在 `js/main.js:701`。
+  控件上），不读内部标志位；harness 表面的契约写在 `js/main.js:720`。
 - 两种形态用同一个端口 5315 轮流起服务器：root 形态是仓自己的 `server.cjs`，前缀形态是
   「把一个只含本仓软链的目录端起来」交给 `python3 -m http.server`（`tools/verify.sh:97-110`）。
   端口按仓分配（本仓占 5315 / CDP 9365，`tools/verify.sh:24`、`:27`），撞号等于把"验收"变成
@@ -158,9 +158,9 @@ bash tools/verify.sh                 # 真 headless Chrome：五种场景 × 两
 
 ```
 $ node tools/docs-test.mjs
-  · 解析 117 条 · 续引 10 条 · 无法定址 0 处 · 带指认 35 条 · 跨仓引用 0 处
+  · 解析 117 条 · 续引 10 条 · 无法定址 0 处 · 带指认 36 条 · 跨仓引用 0 处
 
-文档行号对账：2 份文档 · 117 条引用 · 35 条带指认 · 28 条判据
+文档行号对账：2 份文档 · 117 条引用 · 36 条带指认 · 28 条判据
 
 28 通过 / 0 失败
 ```
@@ -180,7 +180,7 @@ $ node tools/docs-test.mjs
   真声明里挑），没有写死的行号——写死行号的夹具会在有人往那个文件上面插一行的那天停止测试。
 - 接线：同一条命令住在 `npm test` 的链里、`bash tools/verify.sh` 的末尾与 CI 的 check job 里
   （`.github/workflows/ci.yml` 里真有 `run: node tools/docs-test.mjs`，认的是调用那一行）。
-  它**不在**引擎测试那批文件里——`node tools/engine-test.mjs` 的 655 条是引擎断言，别把两个数混着抄。
+  它**不在**引擎测试那批文件里——`node tools/engine-test.mjs` 的 677 条是引擎断言，别把两个数混着抄。
 
 ### 这一腿第一轮咬到了什么
 
@@ -206,7 +206,7 @@ $ node tools/docs-test.mjs
 - 它只证明印在纸上的行号还坐在它所描述的那几行上，**不证明周围的句子**。
   `js/engine/count.js:104` 那行真的有 `if (nodes >= budget)`，但"先判再走"这个说法对不对，还得人去读。
 - 反引号外的行号（正文里裸写的"第 104 行"）它看不见——只认反引号里 `path:NN` 这一种形状。
-- 一百多条引用里带指认的只有 35 条，其余的只核"落在非空行上"。指认靠的是写文档的人肯在旁边
+- 一百多条引用里带指认的只有 36 条，其余的只核"落在非空行上"。指认靠的是写文档的人肯在旁边
   留一个名字，腿不能替他留。
 - 能指回的只有 `js/**`、`tools/**`、`server.cjs`、`index.html`、`package.json` 这些仓内路径；
   `DESIGN.md` 里提到的 `cf3794f` 那种 commit 号不在任何一条腿里。
@@ -306,7 +306,7 @@ MIT，见 `LICENSE`。
   内联成 base64 的图标先解码再读同一段。后一条不是可选项：图标可能住在清单里而不是盘上的 `.png`
   （有的仓另有一条"零二进制文件"的承诺，那条只约束"有没有 .png 这个文件"）；如果 P 段只筛文件名，
   声明写 512 而真图 192 就一路放行。
-- **钉住两个数**：R 段实际检查的路径条数（`31`）与这一次跑的断言条数（`49`），两个数
+- **钉住两个数**：R 段实际检查的路径条数（`34`）与这一次跑的断言条数（`56`），两个数
   都钉在 `tools/deploy-set.mjs` 顶部的那对常量里。没改页面却掉了，说明解析断了；删掉一张图标会同时
   少一条 R10 与那张的 P1/P2，所以两个数一起钉，断言条数能漂就是闸在缩水的信号。这一节故意只写数值、
   不写那对常量的名字，也不写别仓文档闸的编号：有的仓的文档闸会拿"文档里出现过的同名标识号"回数它
@@ -317,7 +317,7 @@ MIT，见 `LICENSE`。
 各下一刀（X1 清单不收位图目录 / X2 模块边改名 / X3 CSS 写绝对路径 / X4 `start_url` 绝对 /
 X5 删光 >=512 图标 / X6 少一个必填字段 / X7 声明尺寸与真图不符 / X8 workflow 不调脚本 /
 X9 CI 不跑闸 / X10 是阴性对照——往入口 JS 追加一行只写在注释里的假路径，闸必须仍然绿、条数仍然
-`31`、断言仍然 `49`；X11 og:image 退回相对路径 / X12 og:image 的前缀指向别的 slug /
+`34`、断言仍然 `56`；X11 og:image 退回相对路径 / X12 og:image 的前缀指向别的 slug /
 X13 内联位图谎报尺寸——只在有靶子时下：X11/X12 要页面上那句 og:image，X13 要清单里真有一段 base64
 图标，没有就打印 SKIP；反过来 X1 没有位图目录可砍时改砍 css，P 段一位都不核时台架直接报靶子不够），
 要求每一刀都让闸**点名**变红。靶子从 `DEPLOY_SET_DUMP=1`
